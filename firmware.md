@@ -68,7 +68,7 @@ const int PIN_DOOR_SENSOR = 22;  // Solenoid feedback wire
 
 // Timing settings
 const unsigned long UNLOCK_DURATION    = 3000;   // 3-second power pulse to release latch
-const unsigned long POLL_INTERVAL      = 1500;   // Check for unlock every 1.5 seconds
+const unsigned long POLL_INTERVAL      = 1500;   // Check for unlock every 1.5 seconds (snappy unlock response; server handles load via in-memory cache)
 const unsigned long HEARTBEAT_INTERVAL = 15000;  // Keep-alive ping every 15 seconds
 const unsigned long DEBOUNCE_DELAY     = 60;     // Sensor debounce in ms
 

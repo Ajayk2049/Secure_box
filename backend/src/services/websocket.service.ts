@@ -49,6 +49,11 @@ class WebSocketService {
     const clean = deviceId.trim();
     const upper = clean.toUpperCase();
 
+    // If client is already subscribed to this room, skip redundant DB check and log spam
+    if (client.rooms.has(upper) || client.rooms.has(clean)) {
+      return true;
+    }
+
     // Admins have access to monitor all devices
     if (client.role === "admin") {
       client.rooms.add(upper);
@@ -89,23 +94,39 @@ class WebSocketService {
     }
   }
 
-  broadcastToDevice(deviceId: string, message: Record<string, unknown>): void {
+  broadcastToDeviceGroup(
+    targets: (string | mongoose.Types.ObjectId | undefined | null)[],
+    message: Record<string, unknown>
+  ): void {
+    const validTargets = new Set<string>();
+    for (const t of targets) {
+      if (t) {
+        const str = t.toString().trim();
+        if (str) {
+          validTargets.add(str);
+          validTargets.add(str.toUpperCase());
+          validTargets.add(str.toLowerCase());
+        }
+      }
+    }
+
+    if (validTargets.size === 0) return;
     const payload = JSON.stringify(message);
-    const clean = deviceId.trim();
-    const upper = clean.toUpperCase();
-    const lower = clean.toLowerCase();
 
     this.clients.forEach((client) => {
-      if (
-        (client.rooms.has(clean) ||
-          client.rooms.has(upper) ||
-          client.rooms.has(lower) ||
-          client.userId === clean) &&
-        client.ws.readyState === WebSocket.OPEN
-      ) {
-        client.ws.send(payload);
+      if (client.ws.readyState === WebSocket.OPEN) {
+        const matches =
+          validTargets.has(client.userId) ||
+          Array.from(client.rooms).some((r) => validTargets.has(r));
+        if (matches) {
+          client.ws.send(payload);
+        }
       }
     });
+  }
+
+  broadcastToDevice(deviceId: string, message: Record<string, unknown>): void {
+    this.broadcastToDeviceGroup([deviceId], message);
   }
 
   broadcastToAll(message: Record<string, unknown>): void {

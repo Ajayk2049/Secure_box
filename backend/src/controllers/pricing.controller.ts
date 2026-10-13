@@ -151,9 +151,6 @@ export async function approveSlotRequest(request: FastifyRequest, reply: Fastify
     allowedSlots: 5,
     message: "Congratulations! All 5 locker member slots are now unlocked.",
   };
-  wsService.broadcastToDevice(device.deviceId, statusMsg);
-  wsService.broadcastToDevice(device._id.toString(), statusMsg);
-  if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), statusMsg);
   wsService.broadcastToAll(statusMsg);
 
   return reply.send({
@@ -243,9 +240,6 @@ export async function revokeSlotRequest(request: FastifyRequest, reply: FastifyR
     allowedSlots: 2,
     message: "Locker member slots reset to base 2 slots.",
   };
-  wsService.broadcastToDevice(device.deviceId, statusMsg);
-  wsService.broadcastToDevice(device._id.toString(), statusMsg);
-  if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), statusMsg);
   wsService.broadcastToAll(statusMsg);
 
   return reply.send({

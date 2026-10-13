@@ -206,77 +206,85 @@ class _HomeScreenState extends State<HomeScreen> {
     final devices = homeVM.devices;
 
     if (devices.isEmpty) {
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 95),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight - 107),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      HomeUserGreeting(
-                        userName: userName,
-                        showAddButton: false,
-                        isOffline: homeVM.isOffline,
-                        onAddLocker: () => _showAddLocker(context),
-                      ),
-                      if (homeVM.isOffline) ...[
-                        const SizedBox(height: 16),
-                        ConnectionWarningCard(issue: homeVM.connectionIssue),
+      return RefreshIndicator(
+        color: ParcelGlassColors.accentBlue,
+        onRefresh: () => homeVM.fetchDevices(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 95),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 107),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        HomeUserGreeting(
+                          userName: userName,
+                          showAddButton: false,
+                          isOffline: homeVM.isOffline,
+                          onAddLocker: () => _showAddLocker(context),
+                        ),
+                        if (homeVM.isOffline) ...[
+                          const SizedBox(height: 16),
+                          ConnectionWarningCard(issue: homeVM.connectionIssue),
+                        ],
                       ],
-                    ],
-                  ),
-                  HomeEmptyState(
-                    loading: homeVM.loading,
-                    isOffline: homeVM.isOffline,
-                    onAddLocker: () => _showAddLocker(context),
-                  ),
-                  const SizedBox(height: 10),
-                ],
+                    ),
+                    HomeEmptyState(
+                      loading: homeVM.loading,
+                      isOffline: homeVM.isOffline,
+                      onAddLocker: () => _showAddLocker(context),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
     }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 110),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 700),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              HomeUserGreeting(
-                userName: userName,
-                showAddButton: true,
-                isOffline: homeVM.isOffline,
-                onAddLocker: () => _showAddLocker(context),
-              ),
-              const SizedBox(height: 16),
-              if (homeVM.isOffline) ...[
-                ConnectionWarningCard(issue: homeVM.connectionIssue),
-              ],
-              for (final device in devices) ...[
-                LockerHeroCard(
-                  device: device,
-                  isUnlocking: _unlockingDeviceId == device.deviceId || _unlockingDeviceId == device.id,
+    return RefreshIndicator(
+      color: ParcelGlassColors.accentBlue,
+      onRefresh: () => homeVM.fetchDevices(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 110),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                HomeUserGreeting(
+                  userName: userName,
+                  showAddButton: true,
                   isOffline: homeVM.isOffline,
-                  isChecking: homeVM.isCheckingReachability,
-                  onUnlock: () => _handleUnlock(device),
-                  onInviteCoOwner: () => _showInviteSheet(context, device.deviceId, device.name),
+                  onAddLocker: () => _showAddLocker(context),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+                if (homeVM.isOffline) ...[
+                  ConnectionWarningCard(issue: homeVM.connectionIssue),
+                ],
+                for (final device in devices) ...[
+                  LockerHeroCard(
+                    device: device,
+                    isUnlocking: _unlockingDeviceId == device.deviceId || _unlockingDeviceId == device.id,
+                    isOffline: homeVM.isOffline,
+                    isChecking: homeVM.isCheckingReachability,
+                    onUnlock: () => _handleUnlock(device),
+                    onInviteCoOwner: () => _showInviteSheet(context, device.deviceId, device.name),
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

@@ -28,13 +28,18 @@ export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
     .lean();
 
   const userId = (user?.id || (user as any)?._id)?.toString().trim().toLowerCase();
+  const now = Date.now();
 
   const mapped = devices.map((d: any) => {
     const obj = { ...d };
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
+    const lastHb = d.lastHeartbeat ? new Date(d.lastHeartbeat).getTime() : 0;
+    // Live freshness evaluation: if device hasn't pinged in > 5.5s, report offline immediately
+    const isActuallyOnline = Boolean(d.online && (now - lastHb < 5500));
     return {
       ...obj,
+      online: isActuallyOnline,
       isOwner,
       userRole: isOwner ? "Owner" : "Co-Owner",
     };
@@ -145,12 +150,8 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
     doorStatus: "unlocked",
     online: true,
   };
-  wsService.broadcastToDevice(device.deviceId, statusMsg);
-  wsService.broadcastToDevice(device._id.toString(), statusMsg);
-  if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), statusMsg);
-  if (Array.isArray(device.coOwners)) {
-    device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), statusMsg));
-  }
+  const targets = [device.deviceId, device._id, device.ownerId, ...(device.coOwners || [])];
+  wsService.broadcastToDeviceGroup(targets, statusMsg);
 
   return reply.send({
     success: true,

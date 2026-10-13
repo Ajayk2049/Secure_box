@@ -23,12 +23,12 @@ class HomeViewModel extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   String? _selectedDeviceId;
+  bool _isFetchingLogs = false;
   ConnectionIssue _connectionIssue = ConnectionIssue.none;
   bool _isDiagnosing = false;
   bool _isCheckingReachability = true;
 
   int _failedPollAttempts = 0;
-  int _offlineTickCounter = 0;
   static const int maxFailedAttempts = 3;
   bool _isInitialized = false;
 
@@ -88,12 +88,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void _setupPollTimer() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (isOffline) {
-        _offlineTickCounter++;
-        if (_offlineTickCounter < 7) return;
-        _offlineTickCounter = 0;
-      }
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _fetchDevicesSilent();
     });
   }
@@ -338,6 +333,8 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> fetchDeviceLogs(String deviceId) async {
     _selectedDeviceId = deviceId;
+    if (_isFetchingLogs) return;
+    _isFetchingLogs = true;
 
     try {
       final logsData = await _api.getDeviceLogs(deviceId);
@@ -353,6 +350,8 @@ class HomeViewModel extends ChangeNotifier {
         _logs = cached;
       }
       notifyListeners();
+    } finally {
+      _isFetchingLogs = false;
     }
   }
 
