@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import mongoose from "mongoose";
 import { config } from "./config.js";
-import { checkDeviceWatchdog } from "./controllers/deviceIot.controller.js";
+import { checkDeviceWatchdog } from "./services/deviceWatchdog.service.js";
 import { wsService } from "./services/websocket.service.js";
 import { User } from "./models/User.model.js";
 import { loggerConfig, loggerStream, isSilentTerminalPath, logFilePath, pruneLogsOlderThan24Hours } from "./logger.js";
@@ -17,6 +17,7 @@ import mongoSanitizePlugin from "./plugins/mongoSanitize.plugin.js";
 import authRoutes from "./routes/auth.routes.js";
 import deviceRoutes from "./routes/device.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import { deviceWsRoute } from "./routes/deviceWs.route.js";
 import { simulatorHtml } from "./simulator.html.js";
 
 const fastify = Fastify({
@@ -184,6 +185,7 @@ async function bootstrap() {
   await fastify.register(authRoutes, { prefix: "/api/auth" });
   await fastify.register(deviceRoutes, { prefix: "/api" });
   await fastify.register(adminRoutes, { prefix: "/api" });
+  await fastify.register(deviceWsRoute);
 
   fastify.get("/ws", { websocket: true }, async (socket, request) => {
     const query = request.query as { token?: string } | undefined;

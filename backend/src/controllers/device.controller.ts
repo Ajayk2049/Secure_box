@@ -5,6 +5,7 @@ import { User } from "../models/User.model.js";
 import { Log } from "../models/Log.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
+import { deviceSocketService } from "../services/deviceSocket.service.js";
 import { generateDeviceKey } from "./adminRequests.controller.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
@@ -116,6 +117,9 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
 
   const enqueued = commandQueueService.enqueueCommand(device.deviceId, "unlock");
 
+  // Push directly to hardware if connected via WebSocket (instant sub-millisecond dispatch)
+  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(device.deviceId, enqueued.commandId, 3000);
+
   device.doorState = "open";
   device.online = true;
   await device.save();
@@ -129,7 +133,7 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
       userRole,
       userPhone: dbUser?.phone,
       commandId: enqueued.commandId,
-      source: "mobile_app",
+      source: isDirectlyPushed ? "mobile_app_websocket_direct" : "mobile_app_queued",
       deviceId: device.deviceId,
     },
   });
@@ -155,7 +159,9 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
 
   return reply.send({
     success: true,
-    message: "Unlock command queued successfully for device",
+    message: isDirectlyPushed
+      ? "Unlock command dispatched in real-time to locker"
+      : "Unlock command queued successfully for device",
     commandId: enqueued.commandId,
     unlockedBy: userName,
     userRole,

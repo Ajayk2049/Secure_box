@@ -5,6 +5,8 @@ import { Log } from "../models/Log.model.js";
 import { User } from "../models/User.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
+import { deviceSocketService } from "../services/deviceSocket.service.js";
+export { checkDeviceWatchdog } from "../services/deviceWatchdog.service.js";
 
 // 1. Diagnostics endpoint for bench testing: POST /api/test/unlock
 export async function testUnlockDevice(request: FastifyRequest, reply: FastifyReply) {
@@ -32,10 +34,16 @@ export async function testUnlockDevice(request: FastifyRequest, reply: FastifyRe
 
   const enqueued = commandQueueService.enqueueCommand(cleanDeviceId, "unlock");
 
+  // Push directly via WebSocket if hardware is connected in bench testing
+  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(cleanDeviceId, enqueued.commandId, 3000);
+
   await Log.create({
     deviceId: device._id,
     action: "test_unlock_command",
-    metadata: { source: "test_endpoint", commandId: enqueued.commandId },
+    metadata: {
+      source: isDirectlyPushed ? "test_endpoint_websocket_direct" : "test_endpoint",
+      commandId: enqueued.commandId,
+    },
   });
 
   wsService.broadcastToDevice(cleanDeviceId, {
@@ -46,7 +54,9 @@ export async function testUnlockDevice(request: FastifyRequest, reply: FastifyRe
 
   return reply.send({
     success: true,
-    message: `Bench unlock command enqueued for ${cleanDeviceId}`,
+    message: isDirectlyPushed
+      ? `Bench unlock command dispatched in real-time to ${cleanDeviceId}`
+      : `Bench unlock command enqueued for ${cleanDeviceId}`,
     commandId: enqueued.commandId,
     device: {
       deviceId: cleanDeviceId,
@@ -336,34 +346,4 @@ export async function receiveHeartbeat(request: FastifyRequest, reply: FastifyRe
   wsService.broadcastToDeviceGroup([targetId, device._id, device.ownerId], heartbeatMsg);
 
   return reply.send({ success: true, online: true, timestamp: device.lastHeartbeat });
-}
-
-// 5. Watchdog: Inactivity timer marking devices offline
-export async function checkDeviceWatchdog() {
-  try {
-    const threshold = new Date(Date.now() - 30 * 1000);
-    const staleDevices = await Device.find({
-      online: true,
-      $or: [{ lastHeartbeat: { $lt: threshold } }, { lastHeartbeat: null }],
-    });
-
-    if (staleDevices.length === 0) return;
-
-    // Atomically batch update all stale devices to offline in a single database operation
-    const staleIds = staleDevices.map((d) => d._id);
-    await Device.updateMany({ _id: { $in: staleIds } }, { $set: { online: false } });
-
-    for (const dev of staleDevices) {
-
-      const offlineMsg = {
-        type: "DEVICE_STATUS",
-        deviceId: dev.deviceId,
-        online: false,
-        doorState: dev.doorState,
-      };
-      wsService.broadcastToDeviceGroup([dev.deviceId, dev._id, dev.ownerId], offlineMsg);
-    }
-  } catch (err) {
-    console.error("Error in device watchdog:", err);
-  }
 }

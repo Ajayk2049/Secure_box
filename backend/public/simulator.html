@@ -627,9 +627,64 @@
       startLoop();
     }
 
+    let deviceWs = null;
+    let wsReconnectTimer = null;
+
+    function connectDeviceWs() {
+      if (!isPowered) return;
+      if (deviceWs && (deviceWs.readyState === WebSocket.OPEN || deviceWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const id = getDeviceId();
+      const key = getDeviceKey();
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${proto}//${window.location.host}/ws/device?deviceId=${encodeURIComponent(id)}&deviceKey=${encodeURIComponent(key)}`;
+
+      try {
+        deviceWs = new WebSocket(wsUrl);
+        deviceWs.onopen = () => {
+          log("NET", `⚡ WebSocket connected to /ws/device (${id})! Real-time mode active.`, "boot");
+          const wifi = document.getElementById("wifiLed");
+          if (wifi) wifi.className = "led-dot active";
+        };
+        deviceWs.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "UNLOCK") {
+              log("CMD", `⚡ [REAL-TIME WS] Instant UNLOCK received! (CmdID: ${data.commandId})`, "cmd");
+              handleUnlockCommand();
+              if (deviceWs && deviceWs.readyState === WebSocket.OPEN) {
+                deviceWs.send(JSON.stringify({ type: "UNLOCK_ACK", commandId: data.commandId, status: "SUCCESS" }));
+              }
+            } else if (data.type === "HEARTBEAT_ACK") {
+              log("HB", `Heartbeat ACK received via WS (${new Date(data.timestamp).toLocaleTimeString()})`, "hb");
+            }
+          } catch (e) {}
+        };
+        deviceWs.onclose = () => {
+          if (isPowered) {
+            log("NET", "Hardware WebSocket disconnected. Auto-reconnecting in 5s...", "error");
+            if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = setTimeout(connectDeviceWs, 5000);
+          }
+        };
+      } catch (err) {
+        log("NET", `WS connection failed: ${err.message}`, "error");
+      }
+    }
+
+    function disconnectDeviceWs() {
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      if (deviceWs) {
+        try { deviceWs.close(); } catch (e) {}
+        deviceWs = null;
+      }
+    }
+
     function startLoop() {
       stopLoop();
-      // Poll command every 1500ms
+      connectDeviceWs();
+      // Poll command every 1500ms (as secondary fallback)
       pollTimer = setInterval(pollCommand, 1500);
       // Send heartbeat every 15000ms
       heartbeatTimer = setInterval(sendHeartbeat, 15000);
@@ -637,6 +692,7 @@
     }
 
     function stopLoop() {
+      disconnectDeviceWs();
       if (pollTimer) clearInterval(pollTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
@@ -753,6 +809,12 @@
 
       log("UART", `TX -> POST /api/device/telemetry: { deviceId: "${id}", doorState: "${state}", doorStatus: "${doorStatus}" }`, "sensor");
 
+      // Send via real-time WebSocket if connected
+      if (deviceWs && deviceWs.readyState === WebSocket.OPEN) {
+        deviceWs.send(JSON.stringify({ type: "TELEMETRY", deviceId: id, doorState: state, doorStatus }));
+        log("WS", `TX [WS] -> TELEMETRY: { doorState: "${state}" } (Real-Time Push)`, "sensor");
+      }
+
       try {
         const res = await fetch(`${API_BASE}/device/telemetry`, {
           method: "POST",
@@ -787,6 +849,11 @@
       if (!isPowered) return;
       const id = getDeviceId();
       const key = getDeviceKey();
+
+      if (deviceWs && deviceWs.readyState === WebSocket.OPEN) {
+        deviceWs.send(JSON.stringify({ type: "HEARTBEAT", deviceId: id, uptime: Date.now() }));
+      }
+
       try {
         const res = await fetch(`${API_BASE}/device/heartbeat`, {
           method: "POST",
