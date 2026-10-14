@@ -4,3 +4,4 @@
  */
 export * from "./authOtp.controller.js";
 export * from "./authSession.controller.js";
+export * from "./authOrder.controller.js";

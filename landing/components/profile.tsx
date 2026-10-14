@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { LoginForm } from "./auth/LoginForm";
 import { RegisterWizard } from "./auth/RegisterWizard";
+import { ForgotPasswordView } from "./auth/ForgotPasswordView";
 import { OrderView } from "./auth/OrderView";
 import { DeliveryManifest, StoredUserData } from "./auth/DeliveryManifest";
 import { userFetch, clearStoredUserSession } from "@/lib/api";
@@ -16,15 +17,18 @@ export function Profile({ mode }: ProfileProps = {}) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<StoredUserData | null>(null);
   const [isRegister, setIsRegister] = useState(mode === "register");
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
 
   useEffect(() => {
     if (mode === "register") {
       setIsRegister(true);
+      setIsForgotPassword(false);
       setStep(1);
       clearMessages();
     } else if (mode === "login") {
       setIsRegister(false);
+      setIsForgotPassword(false);
       clearMessages();
     }
   }, [mode]);
@@ -304,6 +308,7 @@ export function Profile({ mode }: ProfileProps = {}) {
     clearStoredUserSession();
     setIsLoggedIn(false);
     setIsOrdering(false);
+    setIsForgotPassword(false);
     setCurrentUser(null);
     setStep(1);
     setLoginIdentifier("");
@@ -363,7 +368,28 @@ export function Profile({ mode }: ProfileProps = {}) {
         </div>
       )}
 
-      {isRegister ? (
+      {isForgotPassword ? (
+        <ForgotPasswordView
+          onSwitchToLogin={() => {
+            setIsForgotPassword(false);
+            clearMessages();
+          }}
+          onSuccess={(msg) => {
+            setErrorMessage(null);
+            setInfoMessage(msg);
+          }}
+          onResetComplete={(msg, phone) => {
+            setErrorMessage(null);
+            setInfoMessage(msg);
+            if (phone) setLoginIdentifier(phone);
+            setIsForgotPassword(false);
+          }}
+          onError={(err) => {
+            setInfoMessage(null);
+            setErrorMessage(err);
+          }}
+        />
+      ) : isRegister ? (
         <RegisterWizard
           step={step}
           onSetStep={setStep}
@@ -387,6 +413,7 @@ export function Profile({ mode }: ProfileProps = {}) {
           onSubmit={handleRegisterSubmit}
           onSwitchToLogin={() => {
             setIsRegister(false);
+            setIsForgotPassword(false);
             clearMessages();
           }}
         />
@@ -400,7 +427,12 @@ export function Profile({ mode }: ProfileProps = {}) {
           onSubmit={handleLoginSubmit}
           onSwitchToRegister={() => {
             setIsRegister(true);
+            setIsForgotPassword(false);
             setStep(1);
+            clearMessages();
+          }}
+          onForgotPassword={() => {
+            setIsForgotPassword(true);
             clearMessages();
           }}
         />

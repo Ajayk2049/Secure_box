@@ -34,9 +34,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     handler: checkPhone,
   });
 
-  // 1b. Smart Pre-Check & Send OTP (Max 3 / minute in prod)
+  // 1b. Smart Pre-Check & Send OTP (Rate limited: Max 5 / minute)
   fastify.post("/send-otp", {
-    ...(isProd ? { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } } : {}),
+    config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
     preHandler: [validateBody(sendOtpSchema)],
     handler: sendOtp,
   });
@@ -74,9 +74,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     handler: logoutHandler,
   });
 
-  // 3d. Self-Service Password Reset via Phone OTP (Max 5 / minute in prod)
+  // 3d. Self-Service Password Reset via Phone OTP (Rate limited: Max 5 / minute)
   fastify.post("/reset-password", {
-    ...(isProd ? { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } } : {}),
+    config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
     preHandler: [validateBody(resetPasswordSchema)],
     handler: resetPassword,
   });

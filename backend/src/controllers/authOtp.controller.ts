@@ -11,7 +11,7 @@ import { hashPassword } from "../utils/password.js";
 
 // 1. Send OTP with Smart Pre-Check
 export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
-  const { phone } = request.body as { phone?: string };
+  const { phone, type = "register" } = (request.body as { phone?: string; type?: "register" | "reset" }) || {};
 
   if (!phone) {
     return reply.status(400).send({ error: "Mobile number is required" });
@@ -24,15 +24,25 @@ export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
     });
   }
 
-  const existingUser = await User.findOne({ phone: cleanPhone });
-  if (existingUser) {
+  const userQuery = {
+    $or: [{ phone: cleanPhone }, { phone: `+91${cleanPhone}` }, { phone: `91${cleanPhone}` }],
+  };
+  const existingUser = await User.findOne(userQuery);
+
+  if (type === "register" && existingUser) {
     return reply.status(409).send({
       exists: true,
       error: "An account with this mobile number already exists. Please log in instead.",
     });
   }
+  if (type === "reset" && !existingUser) {
+    return reply.status(404).send({
+      exists: false,
+      error: "No account found registered with this mobile number. Please check the number or sign up.",
+    });
+  }
 
-  // Check existing OTP records for rate limiting (10s cooldown, max 3 per minute)
+  // Check existing OTP records for rate limiting (cooldown & sliding window limits)
   const existingOtps = await Otp.find({ phone: cleanPhone }).sort({ createdAt: -1 });
   const allTimestamps: Date[] = [];
   for (const rec of existingOtps) {
@@ -44,10 +54,11 @@ export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
   }
 
   const now = Date.now();
-  // 1. 10-second cooldown check
+  // 1. Cooldown check (60s for password recovery, 10s for register)
+  const cooldownDuration = type === "reset" ? 60 * 1000 : 10 * 1000;
   const lastRequestTime = allTimestamps.length > 0 ? Math.max(...allTimestamps.map((t) => new Date(t).getTime())) : 0;
-  if (lastRequestTime && now - lastRequestTime < 10 * 1000) {
-    const waitSeconds = Math.ceil((10 * 1000 - (now - lastRequestTime)) / 1000);
+  if (lastRequestTime && now - lastRequestTime < cooldownDuration) {
+    const waitSeconds = Math.ceil((cooldownDuration - (now - lastRequestTime)) / 1000);
     return reply.status(429).send({
       error: `Please wait ${waitSeconds}s before requesting another OTP.`,
       cooldownRemaining: waitSeconds,
@@ -66,6 +77,20 @@ export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
     });
   }
 
+  // 3. For password reset: Max 5 requests per 15 minutes to prevent OTP bombardment
+  if (type === "reset") {
+    const fifteenMinutesAgo = now - 15 * 60 * 1000;
+    const windowRequests = allTimestamps.filter((t) => new Date(t).getTime() > fifteenMinutesAgo);
+    if (windowRequests.length >= 5) {
+      const oldestInWindow = Math.min(...windowRequests.map((t) => new Date(t).getTime()));
+      const waitSeconds = Math.ceil((15 * 60 * 1000 - (now - oldestInWindow)) / 1000);
+      return reply.status(429).send({
+        error: `Security limit reached for password recovery. Maximum 5 OTP requests per 15 minutes. Please try again later.`,
+        cooldownRemaining: waitSeconds,
+      });
+    }
+  }
+
   // Generate cryptographically random 6-digit OTP (or fixed 123456 in demo mode)
   const otp = config.demoMode ? "123456" : crypto.randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -73,9 +98,9 @@ export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
   // Hash OTP using SHA-256 so plaintext OTP is never persisted in database
   const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
 
-  // Keep recent timestamps within the last 5 minutes to maintain sliding rate window
+  // Keep recent timestamps within the last 15 minutes to maintain sliding rate window
   const slidingTimestamps = [
-    ...allTimestamps.filter((t) => new Date(t).getTime() > now - 5 * 60 * 1000),
+    ...allTimestamps.filter((t) => new Date(t).getTime() > now - 15 * 60 * 1000),
     new Date(),
   ];
 
@@ -121,7 +146,9 @@ export async function checkPhone(request: FastifyRequest, reply: FastifyReply) {
     });
   }
 
-  const existingUser = await User.findOne({ phone: cleanPhone });
+  const existingUser = await User.findOne({
+    $or: [{ phone: cleanPhone }, { phone: `+91${cleanPhone}` }, { phone: `91${cleanPhone}` }],
+  });
   return reply.send({
     exists: Boolean(existingUser),
     phone: cleanPhone,
@@ -296,65 +323,3 @@ export async function registerWithOtp(request: FastifyRequest, reply: FastifyRep
   });
 }
 
-// 4. Authenticated User Places a Locker Order
-export async function placeOrder(request: FastifyRequest, reply: FastifyReply) {
-  const authUser = request.user as { id: string };
-  if (!authUser?.id) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
-  const { address, pincode, units } = (request.body as {
-    address?: string;
-    pincode?: string;
-    units?: number;
-  }) || {};
-
-  if (!address || !address.trim()) {
-    return reply.status(400).send({ error: "Doorstep delivery address is required" });
-  }
-
-  const cleanPincode = (pincode || "").trim();
-  const orderUnits = units ? Number(units) || 1 : 1;
-
-  const user = await User.findById(authUser.id);
-  if (!user) {
-    return reply.status(404).send({ error: "User not found" });
-  }
-
-  user.address = address.trim();
-  if (cleanPincode) user.pincode = cleanPincode;
-  const existingRequests = await LockerRequest.find({ userId: user._id, status: { $ne: "rejected" } });
-  const priorUnits = existingRequests.reduce((sum: number, r: any) => sum + (r.units || 1), 0);
-  const totalUnits = priorUnits + orderUnits;
-  user.units = totalUnits;
-  user.orderStatus = "pending";
-  await user.save();
-
-  const lockerReq = await createLockerOrderRequest({
-    userId: user._id,
-    name: user.name,
-    phone: user.phone,
-    email: user.email,
-    address: user.address,
-    pincode: user.pincode,
-    units: orderUnits,
-  });
-
-  return reply.status(201).send({
-    success: true,
-    message: "Order placed successfully! In queue for hub preparation.",
-    order: lockerReq,
-    user: {
-      id: user._id,
-      phone: user.phone,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      address: user.address,
-      pincode: user.pincode,
-      units: user.units,
-      orderStatus: user.orderStatus,
-      assignedDevices: user.assignedDevices || [],
-    },
-  });
-}

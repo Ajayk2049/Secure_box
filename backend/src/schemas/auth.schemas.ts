@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const sendOtpSchema = z.object({
   phone: z.string().min(1, "Mobile number is required"),
+  type: z.enum(["register", "reset"]).optional().default("register"),
 });
 
 export const checkPhoneSchema = z.object({
