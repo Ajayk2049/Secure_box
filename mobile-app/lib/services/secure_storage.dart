@@ -2,75 +2,69 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SecureStorage {
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  static const AndroidOptions _androidOptions = AndroidOptions(
+    encryptedSharedPreferences: true,
+    resetOnError: true,
+  );
+
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
+    aOptions: _androidOptions,
+  );
 
   FlutterSecureStorage get storage => _storage;
 
-  Future<void> saveToken(String token) async {
-    await _storage.write(key: 'auth_token', value: token);
+  Future<String?> _safeRead(String key) async {
+    try {
+      return await _storage.read(key: key).timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => null,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
-  Future<String?> getToken() async {
-    return await _storage.read(key: 'auth_token');
+  Future<void> _safeWrite(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value).timeout(
+        const Duration(seconds: 2),
+      );
+    } catch (_) {}
   }
 
-  Future<void> deleteToken() async {
-    await _storage.delete(key: 'auth_token');
+  Future<void> _safeDelete(String key) async {
+    try {
+      await _storage.delete(key: key).timeout(
+        const Duration(seconds: 2),
+      );
+    } catch (_) {}
   }
 
-  Future<void> saveRefreshToken(String refreshToken) async {
-    await _storage.write(key: 'refresh_token', value: refreshToken);
-  }
+  Future<void> saveToken(String token) async => _safeWrite('auth_token', token);
+  Future<String?> getToken() async => _safeRead('auth_token');
+  Future<void> deleteToken() async => _safeDelete('auth_token');
 
-  Future<String?> getRefreshToken() async {
-    return await _storage.read(key: 'refresh_token');
-  }
-
-  Future<void> deleteRefreshToken() async {
-    await _storage.delete(key: 'refresh_token');
-  }
+  Future<void> saveRefreshToken(String refreshToken) async => _safeWrite('refresh_token', refreshToken);
+  Future<String?> getRefreshToken() async => _safeRead('refresh_token');
+  Future<void> deleteRefreshToken() async => _safeDelete('refresh_token');
 
   Future<bool> hasToken() async {
     final token = await getToken();
     return token != null && token.isNotEmpty;
   }
 
-  Future<void> saveIdentifier(String identifier) async {
-    await _storage.write(key: 'saved_identifier', value: identifier);
-  }
+  Future<void> saveIdentifier(String identifier) async => _safeWrite('saved_identifier', identifier);
+  Future<String?> getSavedIdentifier() async => _safeRead('saved_identifier');
+  Future<void> clearSavedIdentifier() async => _safeDelete('saved_identifier');
 
-  Future<String?> getSavedIdentifier() async {
-    return await _storage.read(key: 'saved_identifier');
-  }
-
-  Future<void> clearSavedIdentifier() async {
-    await _storage.delete(key: 'saved_identifier');
-  }
-
-  Future<void> saveUserData(String userJson) async {
-    await _storage.write(key: 'user_profile', value: userJson);
-  }
-
-  Future<String?> getUserData() async {
-    return await _storage.read(key: 'user_profile');
-  }
-
-  Future<void> deleteUserData() async {
-    await _storage.delete(key: 'user_profile');
-  }
+  Future<void> saveUserData(String userJson) async => _safeWrite('user_profile', userJson);
+  Future<String?> getUserData() async => _safeRead('user_profile');
+  Future<void> deleteUserData() async => _safeDelete('user_profile');
 
   // --- Cached Devices ---
-  Future<void> saveCachedDevices(String devicesJson) async {
-    await _storage.write(key: 'cached_devices', value: devicesJson);
-  }
-
-  Future<String?> getCachedDevices() async {
-    return await _storage.read(key: 'cached_devices');
-  }
-
-  Future<void> deleteCachedDevices() async {
-    await _storage.delete(key: 'cached_devices');
-  }
+  Future<void> saveCachedDevices(String devicesJson) async => _safeWrite('cached_devices', devicesJson);
+  Future<String?> getCachedDevices() async => _safeRead('cached_devices');
+  Future<void> deleteCachedDevices() async => _safeDelete('cached_devices');
 
   // --- Cached Activity History (Strict 7-Day Retention Window) ---
   Future<void> saveCachedLogs(String deviceId, List<Map<String, dynamic>> logsRaw) async {
@@ -86,14 +80,14 @@ class SecureStorage {
       }
     }).toList();
 
-    await _storage.write(
-      key: 'cached_logs_${deviceId.trim().toUpperCase()}',
-      value: jsonEncode(validLogs),
+    await _safeWrite(
+      'cached_logs_${deviceId.trim().toUpperCase()}',
+      jsonEncode(validLogs),
     );
   }
 
   Future<List<Map<String, dynamic>>?> getCachedLogs(String deviceId) async {
-    final raw = await _storage.read(key: 'cached_logs_${deviceId.trim().toUpperCase()}');
+    final raw = await _safeRead('cached_logs_${deviceId.trim().toUpperCase()}');
     if (raw == null || raw.isEmpty) return null;
     try {
       final decoded = jsonDecode(raw);
@@ -115,9 +109,8 @@ class SecureStorage {
     return null;
   }
 
-  Future<void> deleteCachedLogs(String deviceId) async {
-    await _storage.delete(key: 'cached_logs_${deviceId.trim().toUpperCase()}');
-  }
+  Future<void> deleteCachedLogs(String deviceId) async =>
+      _safeDelete('cached_logs_${deviceId.trim().toUpperCase()}');
 
   /// Purges all session tokens, credentials, and cached data on logout
   Future<void> purgeAllSessionData() async {

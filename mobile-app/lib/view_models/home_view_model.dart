@@ -60,8 +60,8 @@ class HomeViewModel extends ChangeNotifier {
     // Listen for global session expiry events (from 401s or WS 4401 close code)
     _sessionExpirySub?.cancel();
     _sessionExpirySub = ApiService.onSessionExpired.stream.listen((_) {
-      _connectionIssue = ConnectionIssue.sessionExpired;
-      _devices = _devices.map((d) => d.copyWith(online: false)).toList();
+      _connectionIssue = ConnectionIssue.none;
+      _devices = [];
       notifyListeners();
     });
 
@@ -193,8 +193,6 @@ class HomeViewModel extends ChangeNotifier {
     } catch (e) {
       final errLower = e.toString().toLowerCase();
       if (errLower.contains('401') || errLower.contains('unauthorized')) {
-        _connectionIssue = ConnectionIssue.sessionExpired;
-        notifyListeners();
         return;
       }
       _failedPollAttempts++;
@@ -243,7 +241,7 @@ class HomeViewModel extends ChangeNotifier {
       _devices = _devices.map((d) => d.copyWith(online: false)).toList();
       final errLower = e.toString().toLowerCase();
       if (errLower.contains('401') || errLower.contains('unauthorized')) {
-        _connectionIssue = ConnectionIssue.sessionExpired;
+        _connectionIssue = ConnectionIssue.none;
         notifyListeners();
       } else {
         notifyListeners();

@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/device.model.dart';
-import '../../services/api_service.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import '../settings/settings_screen.dart';
@@ -26,42 +24,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0; // 0: Home, 1: History, 2: Settings
   String? _unlockingDeviceId;
-  StreamSubscription<String>? _sessionExpirySub;
-
   @override
   void initState() {
     super.initState();
-    _sessionExpirySub = ApiService.onSessionExpired.stream.listen((message) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.lock_clock_rounded, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  message.isNotEmpty ? message : 'Session expired. Please sign in again.',
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: ParcelGlassColors.alertRed,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          action: SnackBarAction(
-            label: 'Sign In',
-            textColor: Colors.white,
-            onPressed: () {
-              context.read<AuthViewModel>().logout();
-              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-            },
-          ),
-        ),
-      );
-    });
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().init();
     });
@@ -69,7 +34,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _sessionExpirySub?.cancel();
     super.dispose();
   }
 

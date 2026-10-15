@@ -37,6 +37,7 @@ class _LoginFormCardState extends State<LoginFormCard> {
     if (!mounted) return;
 
     if (success) {
+      widget.auth.clearError();
       widget.onLoginSuccess();
     } else {
       final errText = widget.auth.error ?? 'Invalid mobile number/email or password';

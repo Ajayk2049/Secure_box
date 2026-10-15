@@ -37,7 +37,9 @@ class _ConnectionWarningCardState extends State<ConnectionWarningCard> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.issue == ConnectionIssue.none) return const SizedBox.shrink();
+    if (widget.issue == ConnectionIssue.none || widget.issue == ConnectionIssue.sessionExpired) {
+      return const SizedBox.shrink();
+    }
 
     final isSessionExpired = widget.issue == ConnectionIssue.sessionExpired;
     final isNoInternet = widget.issue == ConnectionIssue.noInternet;

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../main.dart';
 import '../models/user.model.dart';
 import '../services/api_service.dart';
 import '../services/secure_storage.dart';
@@ -14,6 +16,7 @@ class AuthViewModel extends ChangeNotifier {
   bool _initialized = false;
   String? _error;
   String? _savedIdentifier;
+  Timer? _errorDismissTimer;
 
   UserModel? get user => _user;
   bool get loading => _loading;
@@ -22,6 +25,22 @@ class AuthViewModel extends ChangeNotifier {
   String? get savedIdentifier => _savedIdentifier;
   bool get isAuthenticated => _user != null;
 
+  void setErrorWithAutoDismiss(String message, [Duration duration = const Duration(seconds: 3)]) {
+    _error = message;
+    _errorDismissTimer?.cancel();
+    notifyListeners();
+    _errorDismissTimer = Timer(duration, () {
+      _error = null;
+      notifyListeners();
+    });
+  }
+
+  void clearError() {
+    _errorDismissTimer?.cancel();
+    _error = null;
+    notifyListeners();
+  }
+
   Future<void> init() async {
     _loading = true;
     notifyListeners();
@@ -29,8 +48,9 @@ class AuthViewModel extends ChangeNotifier {
     // Listen for global session expiry events triggered by 401 responses
     ApiService.onSessionExpired.stream.listen((message) {
       _user = null;
-      _error = message;
-      notifyListeners();
+      setErrorWithAutoDismiss(message);
+      // Automatically redirect to login screen on session expiry
+      appNavigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
     });
 
     try {
@@ -52,7 +72,7 @@ class AuthViewModel extends ChangeNotifier {
             await _storage.deleteToken();
             await _storage.deleteRefreshToken();
             _user = null;
-            _error = "Your session has expired. Please sign in again.";
+            setErrorWithAutoDismiss("Your session has expired. Please sign in again.");
           } else {
             // Truly offline: restore cached profile
             final cached = await _storage.getUserData();
@@ -83,10 +103,11 @@ class AuthViewModel extends ChangeNotifier {
       notifyListeners();
       return response;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
-      return {'success': false, 'error': _error};
+      return {'success': false, 'error': err};
     }
   }
 
@@ -121,11 +142,13 @@ class AuthViewModel extends ChangeNotifier {
         _user = UserModel.fromJson(response['user']);
       }
       WebSocketService().reconnectWithNewToken(response['token']);
+      clearError();
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -151,11 +174,13 @@ class AuthViewModel extends ChangeNotifier {
         _user = UserModel.fromJson(response['user']);
       }
       WebSocketService().reconnectWithNewToken(response['token']);
+      clearError();
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -177,7 +202,8 @@ class AuthViewModel extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -185,16 +211,15 @@ class AuthViewModel extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    _errorDismissTimer?.cancel();
+    _error = null;
     WebSocketService().disconnect();
-    await _api.logout();
+    try {
+      await _api.logout();
+    } catch (_) {}
     await _storage.purgeAllSessionData();
     _user = null;
-    notifyListeners();
-  }
-
-  void clearError() {
     _error = null;
     notifyListeners();
   }
 }
-
