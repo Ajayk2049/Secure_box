@@ -104,9 +104,17 @@ class DeviceSocketService {
 
   /**
    * Handles hardware disconnect event immediately.
+   * If a newer active socket already replaced this one, stale socket close is ignored.
    */
-  async handleDisconnect(deviceId: string): Promise<void> {
+  async handleDisconnect(deviceId: string, ws?: WebSocket): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
+    const current = this.devices.get(cleanId);
+
+    // Guard: If this disconnect event belongs to an old replaced socket, do not mark offline!
+    if (ws && current && current.ws !== ws) {
+      return;
+    }
+
     this.devices.delete(cleanId);
     console.log(`[DEVICE-WS] Hardware disconnected: ${cleanId}`);
 
