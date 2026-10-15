@@ -93,7 +93,7 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
       // 3. Disconnection handler
       socket.on("close", () => {
         if (authenticated && deviceId) {
-          deviceSocketService.handleDisconnect(deviceId).catch(() => {});
+          deviceSocketService.handleDisconnect(deviceId).catch(() => { });
         }
       });
 

@@ -67,7 +67,7 @@ class DeviceSocketService {
     if (existing && existing.ws !== ws && existing.ws.readyState === WebSocket.OPEN) {
       try {
         existing.ws.close(4001, "New connection established for device");
-      } catch {}
+      } catch { }
     }
 
     const now = new Date();
@@ -84,7 +84,7 @@ class DeviceSocketService {
     // Update MongoDB status to online
     deviceDoc.online = true;
     deviceDoc.lastHeartbeat = now;
-    await deviceDoc.save().catch(() => {});
+    await deviceDoc.save().catch(() => { });
 
     // Broadcast real-time online status to users & admins
     const targets = [cleanId, deviceDoc._id, deviceDoc.ownerId, ...(deviceDoc.coOwners || [])];
@@ -146,7 +146,7 @@ class DeviceSocketService {
     await Device.updateOne(
       { deviceId: cleanId },
       { $set: { online: true, lastHeartbeat: now } }
-    ).catch(() => {});
+    ).catch(() => { });
 
     if (conn && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify({ type: "HEARTBEAT_ACK", timestamp: now.getTime() }));
