@@ -90,10 +90,17 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
         }
       });
 
-      // 3. Disconnection handler
+      // 3. Native WebSocket ping listener (RFC 6455 protocol ping from webSocket.enableHeartbeat)
+      socket.on("ping", () => {
+        if (authenticated && deviceId) {
+          deviceSocketService.handleHeartbeat(deviceId).catch(() => {});
+        }
+      });
+
+      // 4. Disconnection handler
       socket.on("close", () => {
         if (authenticated && deviceId) {
-          deviceSocketService.handleDisconnect(deviceId).catch(() => { });
+          deviceSocketService.handleDisconnect(deviceId, socket).catch(() => {});
         }
       });
 
