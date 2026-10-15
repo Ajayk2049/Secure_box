@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/device.model.dart';
+import '../../services/api_service.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import '../settings/settings_screen.dart';
 import '../widgets/add_locker_dialog.dart';
+import '../widgets/connection_warning_card.dart';
 import '../widgets/glass_theme.dart';
 import 'widgets/co_owner_invite_sheet.dart';
 import 'widgets/home_bottom_nav.dart';
@@ -22,17 +25,67 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0; // 0: Home, 1: History, 2: Settings
-  bool _isUnlocking = false;
+  String? _unlockingDeviceId;
+  StreamSubscription<String>? _sessionExpirySub;
 
   @override
   void initState() {
     super.initState();
+    _sessionExpirySub = ApiService.onSessionExpired.stream.listen((message) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.lock_clock_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message.isNotEmpty ? message : 'Session expired. Please sign in again.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          action: SnackBarAction(
+            label: 'Sign In',
+            textColor: Colors.white,
+            onPressed: () {
+              context.read<AuthViewModel>().logout();
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+            },
+          ),
+        ),
+      );
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().init();
     });
   }
 
+  @override
+  void dispose() {
+    _sessionExpirySub?.cancel();
+    super.dispose();
+  }
+
   void _showAddLocker(BuildContext context) {
+    if (context.read<HomeViewModel>().isOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Cannot link lockers while offline. Please restore connection.'),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      );
+      return;
+    }
     AddLockerDialog.show(context);
   }
 
@@ -41,7 +94,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleUnlock(DeviceModel device) async {
-    setState(() => _isUnlocking = true);
+    final homeVM = context.read<HomeViewModel>();
+    if (homeVM.isOffline || homeVM.isCheckingReachability) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            homeVM.isCheckingReachability
+                ? 'Connecting to server. Please wait a moment...'
+                : 'Unlock unavailable: Server is currently offline or unreachable.',
+          ),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      );
+      return;
+    }
+    setState(() => _unlockingDeviceId = device.deviceId);
     try {
       await context.read<HomeViewModel>().unlockDevice(device.deviceId);
       if (mounted) {
@@ -76,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isUnlocking = false);
+      if (mounted) setState(() => _unlockingDeviceId = null);
     }
   }
 
@@ -136,60 +206,85 @@ class _HomeScreenState extends State<HomeScreen> {
     final devices = homeVM.devices;
 
     if (devices.isEmpty) {
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 95),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight - 107),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  HomeUserGreeting(
-                    userName: userName,
-                    showAddButton: false,
-                    onAddLocker: () => _showAddLocker(context),
-                  ),
-                  HomeEmptyState(
-                    loading: homeVM.loading,
-                    onAddLocker: () => _showAddLocker(context),
-                  ),
-                  const SizedBox(height: 10),
-                ],
+      return RefreshIndicator(
+        color: ParcelGlassColors.accentBlue,
+        onRefresh: () => homeVM.fetchDevices(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 95),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 107),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        HomeUserGreeting(
+                          userName: userName,
+                          showAddButton: false,
+                          isOffline: homeVM.isOffline,
+                          onAddLocker: () => _showAddLocker(context),
+                        ),
+                        if (homeVM.isOffline) ...[
+                          const SizedBox(height: 16),
+                          ConnectionWarningCard(issue: homeVM.connectionIssue),
+                        ],
+                      ],
+                    ),
+                    HomeEmptyState(
+                      loading: homeVM.loading,
+                      isOffline: homeVM.isOffline,
+                      onAddLocker: () => _showAddLocker(context),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
     }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 110),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 700),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              HomeUserGreeting(
-                userName: userName,
-                showAddButton: true,
-                onAddLocker: () => _showAddLocker(context),
-              ),
-              const SizedBox(height: 16),
-              for (final device in devices) ...[
-                LockerHeroCard(
-                  device: device,
-                  isUnlocking: _isUnlocking,
-                  onUnlock: () => _handleUnlock(device),
-                  onInviteCoOwner: () => _showInviteSheet(context, device.deviceId, device.name),
+    return RefreshIndicator(
+      color: ParcelGlassColors.accentBlue,
+      onRefresh: () => homeVM.fetchDevices(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 110),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                HomeUserGreeting(
+                  userName: userName,
+                  showAddButton: true,
+                  isOffline: homeVM.isOffline,
+                  onAddLocker: () => _showAddLocker(context),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+                if (homeVM.isOffline) ...[
+                  ConnectionWarningCard(issue: homeVM.connectionIssue),
+                ],
+                for (final device in devices) ...[
+                  LockerHeroCard(
+                    device: device,
+                    isUnlocking: _unlockingDeviceId == device.deviceId || _unlockingDeviceId == device.id,
+                    isOffline: homeVM.isOffline,
+                    isChecking: homeVM.isCheckingReachability,
+                    onUnlock: () => _handleUnlock(device),
+                    onInviteCoOwner: () => _showInviteSheet(context, device.deviceId, device.name),
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

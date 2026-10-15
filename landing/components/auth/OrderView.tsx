@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { OrderWizard } from "./OrderWizard";
 import { StoredUserData } from "./DeliveryManifest";
+import { userFetch } from "@/lib/api";
 
 interface OrderViewProps {
   apiUrl: string;
@@ -47,13 +48,8 @@ export function OrderView({
 
     setLoading(true);
     try {
-      const token = localStorage.getItem("smartbox_token");
-      const res = await fetch(`${apiUrl}/auth/order`, {
+      const res = await userFetch("/auth/order", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({
           address: orderAddress.trim(),
           pincode: cleanPin,
@@ -62,7 +58,12 @@ export function OrderView({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to place order");
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("Your session expired. Please sign in again to place your order.");
+        }
+        throw new Error(data.error || "Failed to place order");
+      }
 
       const updatedUser: StoredUserData = {
         id: data.user?.id || currentUser?.id,

@@ -7,6 +7,7 @@ export default fp(async (fastify: FastifyInstance) => {
   fastify.register(fjwt, {
     secret: config.jwtSecret,
     sign: { expiresIn: config.jwtExpiresIn },
+    verify: { algorithms: ["HS256"] },
   });
 
   fastify.decorate("authenticate", async (request: any, reply: any) => {

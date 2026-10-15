@@ -3,11 +3,13 @@ import '../../widgets/glass_theme.dart';
 
 class HomeEmptyState extends StatelessWidget {
   final bool loading;
+  final bool isOffline;
   final VoidCallback onAddLocker;
 
   const HomeEmptyState({
     super.key,
     required this.loading,
+    this.isOffline = false,
     required this.onAddLocker,
   });
 
@@ -54,16 +56,28 @@ class HomeEmptyState extends StatelessWidget {
                 height: 48,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: ParcelGlassColors.accentBlue,
+                    backgroundColor: isOffline ? Colors.grey.shade400 : ParcelGlassColors.accentBlue,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     elevation: 0,
                   ),
-                  onPressed: onAddLocker,
+                  onPressed: isOffline
+                      ? () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('Cannot link lockers while offline. Please restore connection.'),
+                              backgroundColor: ParcelGlassColors.alertRed,
+                              behavior: SnackBarBehavior.floating,
+                              margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                          );
+                        }
+                      : onAddLocker,
                   icon: const Icon(Icons.qr_code, size: 18),
-                  label: const Text(
-                    'ENTER DEVICE CODE',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                  label: Text(
+                    isOffline ? 'LINKING UNAVAILABLE (OFFLINE)' : 'ENTER DEVICE CODE',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                   ),
                 ),
               ),

@@ -33,50 +33,64 @@ export async function getAllRequests(request: FastifyRequest, reply: FastifyRepl
     orderStatus: { $exists: true, $ne: null },
     address: { $exists: true, $ne: "" },
     role: { $ne: "admin" },
-  });
+  })
+    .select("_id name phone email address pincode units orderStatus assignedDevices createdAt")
+    .lean();
 
-  for (const u of usersWithOrders) {
-    const existingReq = await LockerRequest.findOne({ userId: u._id });
-    if (!existingReq) {
-      await LockerRequest.create({
-        userId: u._id,
-        name: u.name || "Customer",
-        phone: u.phone,
-        email: u.email,
-        address: u.address || "Bengaluru",
-        pincode: u.pincode || "560001",
-        units: u.units || 1,
-        status: (u.orderStatus as any) || "pending",
-        assignedDeviceIds: u.assignedDevices || [],
-        createdAt: u.createdAt || new Date(),
-      });
+  if (usersWithOrders.length > 0) {
+    const userIds = usersWithOrders.map((u: any) => u._id);
+    const existingReqs = await LockerRequest.find({ userId: { $in: userIds } })
+      .select("userId")
+      .lean();
+    const existingUserIdsSet = new Set(existingReqs.map((r: any) => r.userId.toString()));
+
+    const missingRequests = usersWithOrders.filter((u: any) => !existingUserIdsSet.has(u._id.toString()));
+    if (missingRequests.length > 0) {
+      await LockerRequest.insertMany(
+        missingRequests.map((u: any) => ({
+          userId: u._id,
+          name: u.name || "Customer",
+          phone: u.phone,
+          email: u.email,
+          address: u.address || "Bengaluru",
+          pincode: u.pincode || "560001",
+          units: u.units || 1,
+          status: (u.orderStatus as any) || "pending",
+          assignedDeviceIds: u.assignedDevices || [],
+          createdAt: u.createdAt || new Date(),
+        }))
+      );
     }
   }
 
   const requests = await LockerRequest.find()
     .populate("userId", "name phone email address pincode units orderStatus")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   // Attach live device heartbeat, key and online status from Device model
-  const allAssignedIds = requests.flatMap((r) => r.assignedDeviceIds || []);
-  const devices = await Device.find({ deviceId: { $in: allAssignedIds } }).select(
-    "deviceId online lastHeartbeat doorState deviceKey"
-  );
+  const allAssignedIds = requests.flatMap((r: any) => r.assignedDeviceIds || []);
+  const devices = await Device.find({ deviceId: { $in: allAssignedIds } })
+    .select("deviceId online lastHeartbeat doorState deviceKey")
+    .lean();
 
   // Auto-backfill deviceKey for older devices created prior to key generator
-  for (const d of devices) {
-    if (!d.deviceKey) {
-      d.deviceKey = generateDeviceKey();
-      await d.save();
-    }
+  const devicesWithoutKey = devices.filter((d: any) => !d.deviceKey);
+  if (devicesWithoutKey.length > 0) {
+    await Promise.all(
+      devicesWithoutKey.map((d: any) => {
+        d.deviceKey = generateDeviceKey();
+        return Device.updateOne({ _id: d._id }, { $set: { deviceKey: d.deviceKey } });
+      })
+    );
   }
 
-  const deviceMap = new Map(devices.map((d) => [d.deviceId, d]));
+  const deviceMap = new Map(devices.map((d: any) => [d.deviceId, d]));
 
-  const requestsWithStatus = requests.map((req) => {
-    const obj = req.toObject();
-    const assignedDevicesInfo = (req.assignedDeviceIds || []).map((id) => {
-      const d = deviceMap.get(id);
+  const requestsWithStatus = requests.map((req: any) => {
+    const obj = { ...req };
+    const assignedDevicesInfo = (req.assignedDeviceIds || []).map((id: string) => {
+      const d: any = deviceMap.get(id);
       return {
         deviceId: id,
         deviceKey: d?.deviceKey || null,
@@ -86,8 +100,8 @@ export async function getAllRequests(request: FastifyRequest, reply: FastifyRepl
       };
     });
 
-    const isDeviceOnline = assignedDevicesInfo.some((d) => d.online);
-    const lastHeartbeat = assignedDevicesInfo.find((d) => d.lastHeartbeat)?.lastHeartbeat || null;
+    const isDeviceOnline = assignedDevicesInfo.some((d: any) => d.online);
+    const lastHeartbeat = assignedDevicesInfo.find((d: any) => d.lastHeartbeat)?.lastHeartbeat || null;
 
     return {
       ...obj,

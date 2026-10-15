@@ -5,6 +5,8 @@ import { Log } from "../models/Log.model.js";
 import { User } from "../models/User.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
+import { deviceSocketService } from "../services/deviceSocket.service.js";
+export { checkDeviceWatchdog } from "../services/deviceWatchdog.service.js";
 
 // 1. Diagnostics endpoint for bench testing: POST /api/test/unlock
 export async function testUnlockDevice(request: FastifyRequest, reply: FastifyReply) {
@@ -32,10 +34,16 @@ export async function testUnlockDevice(request: FastifyRequest, reply: FastifyRe
 
   const enqueued = commandQueueService.enqueueCommand(cleanDeviceId, "unlock");
 
+  // Push directly via WebSocket if hardware is connected in bench testing
+  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(cleanDeviceId, enqueued.commandId, 3000);
+
   await Log.create({
     deviceId: device._id,
     action: "test_unlock_command",
-    metadata: { source: "test_endpoint", commandId: enqueued.commandId },
+    metadata: {
+      source: isDirectlyPushed ? "test_endpoint_websocket_direct" : "test_endpoint",
+      commandId: enqueued.commandId,
+    },
   });
 
   wsService.broadcastToDevice(cleanDeviceId, {
@@ -46,7 +54,9 @@ export async function testUnlockDevice(request: FastifyRequest, reply: FastifyRe
 
   return reply.send({
     success: true,
-    message: `Bench unlock command enqueued for ${cleanDeviceId}`,
+    message: isDirectlyPushed
+      ? `Bench unlock command dispatched in real-time to ${cleanDeviceId}`
+      : `Bench unlock command enqueued for ${cleanDeviceId}`,
     commandId: enqueued.commandId,
     device: {
       deviceId: cleanDeviceId,
@@ -59,17 +69,15 @@ export async function testUnlockDevice(request: FastifyRequest, reply: FastifyRe
 function isDeviceAuthorized(device: any, request: FastifyRequest): boolean {
   const providedKey = (request.headers["x-device-key"] as string | undefined)?.trim();
 
-  // In non-production or demo mode, allow dev requests and auto-provision missing device keys
-  if (process.env.NODE_ENV !== "production" || process.env.DEMO_MODE === "true") {
-    if (!device.deviceKey) {
-      device.deviceKey = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
-      device.save().catch(() => {});
+  // In non-production environments, allow dev requests and auto-provision missing device keys if DEMO_MODE is true
+  if (process.env.NODE_ENV !== "production") {
+    if (process.env.DEMO_MODE === "true" || providedKey === "SIMULATOR_TEST_KEY") {
+      if (!device.deviceKey) {
+        device.deviceKey = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
+        device.save().catch(() => {});
+      }
+      return true;
     }
-    return true;
-  }
-
-  if (providedKey === "SIMULATOR_TEST_KEY" && process.env.DEMO_MODE === "true") {
-    return true;
   }
 
   if (!device.deviceKey) {
@@ -102,8 +110,9 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
   }
 
   let device = await Device.findOne({ deviceId: targetId });
-  if (!device && (process.env.NODE_ENV !== "production" || process.env.DEMO_MODE === "true")) {
-    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${targetId}$`, "i") } });
+  if (!device && process.env.NODE_ENV !== "production") {
+    const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${escaped}$`, "i") } });
   }
 
   if (!device) {
@@ -115,11 +124,17 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
   }
 
   const wasOffline = !device.online;
-  device.online = true;
-  device.lastHeartbeat = new Date();
-  await device.save();
+  const now = Date.now();
+  const lastHeartbeatTime = device.lastHeartbeat ? new Date(device.lastHeartbeat).getTime() : 0;
+  // Throttle MongoDB writes: only save if status changed or >30 seconds elapsed
+  if (wasOffline || now - lastHeartbeatTime > 30000) {
+    device.online = true;
+    device.lastHeartbeat = new Date(now);
+    await device.save();
+  }
 
   if (wasOffline) {
+    const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
     const statusMsg = {
       type: "DEVICE_STATUS",
       deviceId: targetId,
@@ -127,23 +142,13 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
       doorStatus: device.doorState === "closed" ? "locked" : "unlocked",
       online: true,
     };
-    wsService.broadcastToDevice(targetId, statusMsg);
-    wsService.broadcastToDevice(device._id.toString(), statusMsg);
-    if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), statusMsg);
-    if (Array.isArray(device.coOwners)) {
-      device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), statusMsg));
-    }
+    wsService.broadcastToDeviceGroup(targets, statusMsg);
 
     const onlineMsg = {
       type: "DEVICE_ONLINE",
       deviceId: targetId,
     };
-    wsService.broadcastToDevice(targetId, onlineMsg);
-    wsService.broadcastToDevice(device._id.toString(), onlineMsg);
-    if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), onlineMsg);
-    if (Array.isArray(device.coOwners)) {
-      device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), onlineMsg));
-    }
+    wsService.broadcastToDeviceGroup(targets, onlineMsg);
   }
 
   const pending = commandQueueService.popPendingCommand(targetId);
@@ -207,8 +212,9 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
   }
 
   let device = await Device.findOne({ deviceId: targetId });
-  if (!device && (process.env.NODE_ENV !== "production" || process.env.DEMO_MODE === "true")) {
-    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${targetId}$`, "i") } });
+  if (!device && process.env.NODE_ENV !== "production") {
+    const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${escaped}$`, "i") } });
   }
 
   if (!device) {
@@ -233,12 +239,8 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
     doorStatus,
     online: true,
   };
-  wsService.broadcastToDevice(targetId, statusMsg);
-  wsService.broadcastToDevice(device._id.toString(), statusMsg);
-  if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), statusMsg);
-  if (Array.isArray(device.coOwners)) {
-    device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), statusMsg));
-  }
+  const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
+  wsService.broadcastToDeviceGroup(targets, statusMsg);
 
   if (normalizedDoorState === "closed") {
     await Log.create({
@@ -260,12 +262,7 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
       doorStatus: "locked",
       online: true,
     };
-    wsService.broadcastToDevice(targetId, deliveryMsg);
-    wsService.broadcastToDevice(device._id.toString(), deliveryMsg);
-    if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), deliveryMsg);
-    if (Array.isArray(device.coOwners)) {
-      device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), deliveryMsg));
-    }
+    wsService.broadcastToDeviceGroup(targets, deliveryMsg);
   } else {
     // Hardware door opened: check if this was triggered by an authorized app command
     const hasAuthorizedAppUnlock = commandQueueService.hasRecentUnlock(targetId);
@@ -295,12 +292,7 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
         doorStatus: "unlocked",
         online: true,
       };
-      wsService.broadcastToDevice(targetId, emergencyMsg);
-      wsService.broadcastToDevice(device._id.toString(), emergencyMsg);
-      if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), emergencyMsg);
-      if (Array.isArray(device.coOwners)) {
-        device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), emergencyMsg));
-      }
+      wsService.broadcastToDeviceGroup(targets, emergencyMsg);
     }
 
     const openMsg = {
@@ -310,12 +302,7 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
       doorStatus: "unlocked",
       online: true,
     };
-    wsService.broadcastToDevice(targetId, openMsg);
-    wsService.broadcastToDevice(device._id.toString(), openMsg);
-    if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), openMsg);
-    if (Array.isArray(device.coOwners)) {
-      device.coOwners.forEach((cId) => wsService.broadcastToDevice(cId.toString(), openMsg));
-    }
+    wsService.broadcastToDeviceGroup(targets, openMsg);
   }
 
   return reply.send({
@@ -356,37 +343,7 @@ export async function receiveHeartbeat(request: FastifyRequest, reply: FastifyRe
     doorState: device.doorState,
     online: true,
   };
-  wsService.broadcastToDevice(targetId, heartbeatMsg);
-  wsService.broadcastToDevice(device._id.toString(), heartbeatMsg);
-  if (device.ownerId) wsService.broadcastToDevice(device.ownerId.toString(), heartbeatMsg);
+  wsService.broadcastToDeviceGroup([targetId, device._id, device.ownerId], heartbeatMsg);
 
   return reply.send({ success: true, online: true, timestamp: device.lastHeartbeat });
-}
-
-// 5. Watchdog: Inactivity timer marking devices offline
-export async function checkDeviceWatchdog() {
-  try {
-    const threshold = new Date(Date.now() - 30 * 1000);
-    const staleDevices = await Device.find({
-      online: true,
-      $or: [{ lastHeartbeat: { $lt: threshold } }, { lastHeartbeat: null }],
-    });
-
-    for (const dev of staleDevices) {
-      dev.online = false;
-      await dev.save();
-
-      const offlineMsg = {
-        type: "DEVICE_STATUS",
-        deviceId: dev.deviceId,
-        online: false,
-        doorState: dev.doorState,
-      };
-      wsService.broadcastToDevice(dev.deviceId, offlineMsg);
-      wsService.broadcastToDevice(dev._id.toString(), offlineMsg);
-      if (dev.ownerId) wsService.broadcastToDevice(dev.ownerId.toString(), offlineMsg);
-    }
-  } catch (err) {
-    console.error("Error in device watchdog:", err);
-  }
 }

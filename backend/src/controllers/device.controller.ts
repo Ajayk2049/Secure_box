@@ -5,6 +5,7 @@ import { User } from "../models/User.model.js";
 import { Log } from "../models/Log.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
+import { deviceSocketService } from "../services/deviceSocket.service.js";
 import { generateDeviceKey } from "./adminRequests.controller.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
@@ -24,16 +25,22 @@ export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
     $or: [{ ownerId: user.id }, { coOwners: user.id }],
   })
     .populate("ownerId", "email name")
-    .populate("coOwners", "email name");
+    .populate("coOwners", "email name")
+    .lean();
 
   const userId = (user?.id || (user as any)?._id)?.toString().trim().toLowerCase();
+  const now = Date.now();
 
   const mapped = devices.map((d: any) => {
-    const obj = d.toObject ? d.toObject() : { ...d };
+    const obj = { ...d };
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
+    const lastHb = d.lastHeartbeat ? new Date(d.lastHeartbeat).getTime() : 0;
+    // Live freshness evaluation: if device hasn't pinged in > 5.5s, report offline immediately
+    const isActuallyOnline = Boolean(d.online && (now - lastHb < 5500));
     return {
       ...obj,
+      online: isActuallyOnline,
       isOwner,
       userRole: isOwner ? "Owner" : "Co-Owner",
     };
@@ -110,6 +117,13 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
 
   const enqueued = commandQueueService.enqueueCommand(device.deviceId, "unlock");
 
+  // Push directly to hardware if connected via WebSocket (instant sub-millisecond dispatch)
+  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(device.deviceId, enqueued.commandId, 3000);
+
+  device.doorState = "open";
+  device.online = true;
+  await device.save();
+
   await Log.create({
     deviceId: device._id,
     action: "unlock",
@@ -119,22 +133,35 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
       userRole,
       userPhone: dbUser?.phone,
       commandId: enqueued.commandId,
-      source: "mobile_app",
+      source: isDirectlyPushed ? "mobile_app_websocket_direct" : "mobile_app_queued",
       deviceId: device.deviceId,
     },
   });
 
-  wsService.broadcastToDevice(device.deviceId, {
+  const unlockCommandMsg = {
     type: "UNLOCK_COMMAND",
     deviceId: device.deviceId,
     commandId: enqueued.commandId,
     unlockedBy: userName,
     userRole,
-  });
+  };
+  wsService.broadcastToDevice(device.deviceId, unlockCommandMsg);
+
+  const statusMsg = {
+    type: "DEVICE_STATUS",
+    deviceId: device.deviceId,
+    doorState: "open",
+    doorStatus: "unlocked",
+    online: true,
+  };
+  const targets = [device.deviceId, device._id, device.ownerId, ...(device.coOwners || [])];
+  wsService.broadcastToDeviceGroup(targets, statusMsg);
 
   return reply.send({
     success: true,
-    message: "Unlock command queued successfully for device",
+    message: isDirectlyPushed
+      ? "Unlock command dispatched in real-time to locker"
+      : "Unlock command queued successfully for device",
     commandId: enqueued.commandId,
     unlockedBy: userName,
     userRole,

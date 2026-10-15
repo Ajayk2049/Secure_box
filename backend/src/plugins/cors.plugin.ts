@@ -18,14 +18,31 @@ export default fp(async (fastify: FastifyInstance) => {
       // Allow requests with no origin (like mobile apps, curl, postman, hardware simulator)
       if (!origin) return cb(null, true);
 
-      // Check allowlist
-      if (allowedOrigins.includes(origin) || origin.endsWith(".yourdomain.com")) {
+      // Check explicit allowlist
+      if (allowedOrigins.includes(origin)) {
         return cb(null, true);
       }
 
-      // In development mode, allow local network IP addresses
-      if (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) {
-        return cb(null, true);
+      try {
+        const url = new URL(origin);
+        const hostname = url.hostname;
+
+        // 1. Allow localhost, loopback, and local network IPs
+        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+          return cb(null, true);
+        }
+
+        // 2. Allow any IPv4 address for VPS testing (e.g., http://<vps-ip>:<port>)
+        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+          return cb(null, true);
+        }
+
+        // 3. Strict domain check (prevents attacker-yourdomain.com subdomain bypasses)
+        if (hostname === "yourdomain.com" || hostname.endsWith(".yourdomain.com")) {
+          return cb(null, true);
+        }
+      } catch {
+        // Malformed origin URL
       }
 
       cb(new Error("CORS policy does not allow access from this origin"), false);

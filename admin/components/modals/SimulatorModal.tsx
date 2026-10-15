@@ -1,5 +1,6 @@
 import React from "react";
 import { Cpu, X, ExternalLink } from "lucide-react";
+import { getBackendBaseUrl } from "@/lib/api";
 
 interface SimulatorModalProps {
   data: {
@@ -11,9 +12,7 @@ interface SimulatorModalProps {
 }
 
 export function SimulatorModal({ data, onClose }: SimulatorModalProps) {
-  const backendBase = (
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:4300/api"
-  ).replace(/\/api\/?$/, "");
+  const backendBase = getBackendBaseUrl();
 
   const adminToken =
     typeof window !== "undefined" ? localStorage.getItem("admin_token") || "" : "";

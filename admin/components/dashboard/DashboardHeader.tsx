@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Search, RefreshCw, Sun, Moon, LogOut, Cpu, Tag } from "lucide-react";
+import { getBackendBaseUrl } from "@/lib/api";
 
 export type MainDashboardTab = "live" | "pending" | "slot-upgrades" | "all";
 export type PendingSubFilter = "all" | "pending" | "preparing" | "dispatched";
@@ -47,9 +48,7 @@ export function DashboardHeader({
   onPendingSubFilterChange,
   filterCounts,
 }: DashboardHeaderProps) {
-  const simulatorDirectUrl = `${(
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:4300/api"
-  ).replace(/\/api\/?$/, "")}/simulator?deviceId=BOX_001&key=SIMULATOR_TEST_KEY`;
+  const simulatorDirectUrl = `${getBackendBaseUrl()}/simulator?deviceId=BOX_001&key=SIMULATOR_TEST_KEY`;
 
   return (
     <>

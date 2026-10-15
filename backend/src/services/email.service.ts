@@ -1,6 +1,15 @@
 import { Resend } from "resend";
 import { config } from "../config.js";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 class EmailService {
   private resend: Resend | null = null;
 
@@ -19,14 +28,16 @@ class EmailService {
       return;
     }
 
+    const safeDeviceName = escapeHtml(deviceName || "Secure Box");
+
     try {
       await this.resend.emails.send({
-        from: "SmartBox <noreply@yourdomain.com>",
+        from: "Secure Box <noreply@yourdomain.com>",
         to,
-        subject: `Parcel Delivered to ${deviceName}`,
+        subject: `Parcel Delivered to ${safeDeviceName}`,
         html: `
           <h1>Package Delivered!</h1>
-          <p>Your parcel has been delivered to <strong>${deviceName}</strong>.</p>
+          <p>Your parcel has been delivered to <strong>${safeDeviceName}</strong>.</p>
           <p>The door has been securely closed and locked.</p>
         `,
       });

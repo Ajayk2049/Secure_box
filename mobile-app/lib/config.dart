@@ -4,9 +4,6 @@ class AppConfig {
   static const String defaultLocalHost = '192.168.0.102:4300';
   static const String prodHost = 'api.yourdomain.com';
 
-  static const String googleServerClientId =
-      '994828674942-tejtf8ntc6md6dvv3uvq0j92js6c42tk.apps.googleusercontent.com';
-
   static bool _isProd = false;
   static String _activeHost = defaultLocalHost;
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
@@ -31,14 +28,14 @@ class AppConfig {
 
   static String get currentHost => _isProd ? prodHost : _activeHost;
 
-  /// Validates that a host belongs to private LAN / loopback addresses for dev testing
+  /// Validates that a host belongs to loopback, LAN, or VPS IP addresses for testing
   static bool _isValidDevHost(String host) {
     final clean = host.trim().replaceAll('http://', '').replaceAll('https://', '').replaceAll('/', '');
     final hostOnly = clean.contains(':') ? clean.split(':').first : clean;
     return hostOnly == 'localhost' ||
         hostOnly == '127.0.0.1' ||
         hostOnly == '10.0.2.2' ||
-        RegExp(r'^(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$').hasMatch(hostOnly);
+        RegExp(r'^(\d{1,3}\.){3}\d{1,3}$').hasMatch(hostOnly);
   }
 
   static Future<bool> updateHost(String newHost) async {

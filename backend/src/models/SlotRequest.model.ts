@@ -105,6 +105,8 @@ const slotRequestSchema = new Schema<ISlotRequest>(
   { timestamps: true }
 );
 
+slotRequestSchema.index({ status: 1, createdAt: -1 });
+
 export const SlotRequest = mongoose.model<ISlotRequest>(
   "SlotRequest",
   slotRequestSchema

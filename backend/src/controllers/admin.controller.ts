@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import { hashPassword } from "../utils/password.js";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { Device } from "../models/Device.model.js";
 import { User } from "../models/User.model.js";
@@ -19,8 +19,8 @@ export async function createCustomer(request: FastifyRequest, reply: FastifyRepl
     return reply.status(400).send({ error: "Phone number or email is required" });
   }
 
-  if (!password || password.trim().length < 6) {
-    return reply.status(400).send({ error: "Password is required and must be at least 6 characters long" });
+  if (!password || password.trim().length < 6 || password.trim().length > 12) {
+    return reply.status(400).send({ error: "Password is required and must be between 6 and 12 characters long" });
   }
 
   const cleanPhone = phone ? smsService.normalizePhone(phone) : undefined;
@@ -29,7 +29,7 @@ export async function createCustomer(request: FastifyRequest, reply: FastifyRepl
     if (existing) return reply.status(409).send({ error: "Customer with this phone already exists" });
   }
 
-  const hashedPassword = await bcrypt.hash(password.trim(), 10);
+  const hashedPassword = await hashPassword(password.trim());
 
   const userData: any = {
     name: name?.trim() || "Customer",

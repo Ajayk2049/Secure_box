@@ -5,21 +5,18 @@ import { FastifyInstance } from "fastify";
 export default fp(async (fastify: FastifyInstance) => {
   const isProd = process.env.NODE_ENV === "production";
   // Origins allowed to embed backend pages (e.g. /simulator iframed by Admin dashboard).
-  // NOTE: CSP omits ports on purpose — "http://localhost" matches ANY localhost port.
-  // Replace yourdomain.com with the real production frontend domains.
-  const frameAncestors = isProd
-    ? ["'self'", "https://yourdomain.com", "https://*.yourdomain.com"]
-    : [
-        "'self'",
-        "http://localhost:*",
-        "http://127.0.0.1:*",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-      ];
+  // Supports local development, IP-based VPS staging/testing, and domain-based production.
+  const frameAncestors = [
+    "'self'",
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+    "http://*:3000",
+    "http://*:3001",
+    "http://*:3002",
+    "http://*:*",
+    "https://*.yourdomain.com",
+    "https://yourdomain.com",
+  ];
 
   await fastify.register(helmet, {
     // Enable HSTS (Strict-Transport-Security) for 1 year including subdomains

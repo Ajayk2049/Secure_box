@@ -37,6 +37,10 @@ export function DeliveryManifest({ currentUser, onLogout, onStartOrder }: Delive
     .toUpperCase();
 
   const hasOrder = Boolean(currentUser?.orderStatus);
+  const unitCount =
+    typeof currentUser?.units === "number"
+      ? currentUser.units
+      : currentUser?.assignedDevices?.length || 0;
 
   return (
     <div className="flex-1 flex items-center justify-center w-full h-full font-sans p-1 sm:p-2">
@@ -60,9 +64,14 @@ export function DeliveryManifest({ currentUser, onLogout, onStartOrder }: Delive
                 <h4 className="font-black text-sm text-[#3D2310] truncate">
                   {currentUser?.name || "Customer"}
                 </h4>
-                <p className="text-xs text-zinc-600 font-mono truncate font-semibold">
-                  {currentUser?.phone ? `+91 ${currentUser.phone}` : currentUser?.email || "Verified"}
-                </p>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <p className="text-xs text-zinc-600 font-mono truncate font-semibold">
+                    {currentUser?.phone ? `+91 ${currentUser.phone}` : currentUser?.email || "Verified"}
+                  </p>
+                  <span className="inline-flex items-center px-1.5 py-0.5 bg-amber-100 text-[#3D2310] font-mono text-[10px] font-black border border-amber-300 shrink-0">
+                    {unitCount} {unitCount === 1 ? "UNIT" : "UNITS"}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -123,7 +132,7 @@ export function DeliveryManifest({ currentUser, onLogout, onStartOrder }: Delive
                     <Package className="w-4 h-4 text-amber-800" /> Lockers Ordered:
                   </span>
                   <span className="font-black text-[#3D2310] font-mono text-sm">
-                    {currentUser?.units || 1} Unit{(currentUser?.units || 1) > 1 ? "s" : ""}
+                    {unitCount} {unitCount === 1 ? "Unit" : "Units"}
                   </span>
                 </div>
 
@@ -181,6 +190,14 @@ export function DeliveryManifest({ currentUser, onLogout, onStartOrder }: Delive
             <>
               {/* Linked Hardware Overview */}
               <div className="bg-white p-3 border-2 border-[#3D2310]/20 text-xs space-y-2">
+                <div className="flex items-center justify-between text-xs pb-1.5 border-b border-zinc-200">
+                  <span className="text-zinc-500 flex items-center gap-1.5 font-bold">
+                    <Package className="w-4 h-4 text-amber-800" /> Locker Units:
+                  </span>
+                  <span className="font-mono font-bold text-[#3D2310]">
+                    {unitCount} {unitCount === 1 ? "Unit" : "Units"}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between text-xs pb-1.5 border-b border-zinc-200">
                   <span className="text-zinc-500 flex items-center gap-1.5 font-bold">
                     <Package className="w-4 h-4 text-amber-800" /> Linked Devices:

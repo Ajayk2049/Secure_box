@@ -42,6 +42,7 @@ const userSchema = new Schema<IUser>(
       type: String,
       required: true,
       minlength: 6,
+      select: false,
     },
     role: {
       type: String,
@@ -66,7 +67,7 @@ const userSchema = new Schema<IUser>(
     },
     units: {
       type: Number,
-      default: 1,
+      default: 0,
     },
     orderStatus: {
       type: String,

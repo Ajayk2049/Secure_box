@@ -4,12 +4,14 @@ import '../../widgets/glass_theme.dart';
 class HomeUserGreeting extends StatelessWidget {
   final String userName;
   final bool showAddButton;
+  final bool isOffline;
   final VoidCallback onAddLocker;
 
   const HomeUserGreeting({
     super.key,
     required this.userName,
     required this.showAddButton,
+    this.isOffline = false,
     required this.onAddLocker,
   });
 
@@ -64,9 +66,25 @@ class HomeUserGreeting extends StatelessWidget {
         const Spacer(),
         if (showAddButton)
           IconButton(
-            icon: const Icon(Icons.add_circle_outline, color: ParcelGlassColors.accentBlue, size: 26),
-            tooltip: 'Add Locker',
-            onPressed: onAddLocker,
+            icon: Icon(
+              Icons.add_circle_outline,
+              color: isOffline ? Colors.black26 : ParcelGlassColors.accentBlue,
+              size: 26,
+            ),
+            tooltip: isOffline ? 'Unavailable while offline' : 'Add Locker',
+            onPressed: isOffline
+                ? () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Cannot add lockers while offline. Please restore connection.'),
+                        backgroundColor: ParcelGlassColors.alertRed,
+                        behavior: SnackBarBehavior.floating,
+                        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    );
+                  }
+                : onAddLocker,
           ),
       ],
     );

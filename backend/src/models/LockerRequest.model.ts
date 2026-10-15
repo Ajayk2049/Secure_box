@@ -103,6 +103,9 @@ const lockerRequestSchema = new Schema<ILockerRequest>(
   { timestamps: true }
 );
 
+lockerRequestSchema.index({ userId: 1, createdAt: -1 });
+lockerRequestSchema.index({ status: 1, createdAt: -1 });
+
 export const LockerRequest = mongoose.model<ILockerRequest>(
   "LockerRequest",
   lockerRequestSchema

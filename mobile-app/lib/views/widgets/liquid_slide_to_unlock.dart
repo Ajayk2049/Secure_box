@@ -7,6 +7,8 @@ class LiquidSlideToUnlock extends StatefulWidget {
   final bool isUnlocking;
   final bool isLockerOnline;
   final bool isUnlocked;
+  final bool enabled;
+  final bool isChecking;
 
   const LiquidSlideToUnlock({
     super.key,
@@ -14,18 +16,58 @@ class LiquidSlideToUnlock extends StatefulWidget {
     this.isUnlocking = false,
     this.isLockerOnline = true,
     this.isUnlocked = false,
+    this.enabled = true,
+    this.isChecking = false,
   });
 
   @override
   State<LiquidSlideToUnlock> createState() => _LiquidSlideToUnlockState();
 }
 
-class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
+class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _snapBackController;
+  Animation<double>? _snapAnimation;
   double _dragProgress = 0.0;
   bool _triggered = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _snapBackController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    )..addListener(() {
+        if (_snapAnimation != null) {
+          setState(() {
+            _dragProgress = _snapAnimation!.value;
+          });
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _snapBackController.dispose();
+    super.dispose();
+  }
+
+  void _snapBack() {
+    if (_dragProgress <= 0.0) return;
+    _snapAnimation = Tween<double>(begin: _dragProgress, end: 0.0).animate(
+      CurvedAnimation(parent: _snapBackController, curve: Curves.easeOutCubic),
+    );
+    _snapBackController.forward(from: 0.0);
+  }
+
+  void _onHorizontalDragStart(DragStartDetails details) {
+    if (_snapBackController.isAnimating) {
+      _snapBackController.stop();
+    }
+  }
+
   void _onHorizontalDragUpdate(DragUpdateDetails details, double trackWidth) {
-    if (widget.isUnlocking || !widget.isLockerOnline || widget.isUnlocked || _triggered) return;
+    if (widget.isUnlocking || !widget.isLockerOnline || widget.isUnlocked || !widget.enabled || widget.isChecking || _triggered) return;
 
     const thumbSize = 52.0;
     final usableWidth = trackWidth - thumbSize - 12.0;
@@ -38,12 +80,10 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
     if (_dragProgress >= 0.88 && !_triggered) {
       _triggered = true;
       HapticFeedback.heavyImpact();
-      widget.onUnlock().whenComplete(() {
+      widget.onUnlock().catchError((_) {}).whenComplete(() {
         if (mounted) {
-          setState(() {
-            _dragProgress = 0.0;
-            _triggered = false;
-          });
+          _triggered = false;
+          _snapBack();
         }
       });
     }
@@ -51,9 +91,12 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
 
   void _onHorizontalDragEnd(DragEndDetails details) {
     if (_triggered) return;
-    setState(() {
-      _dragProgress = 0.0;
-    });
+    _snapBack();
+  }
+
+  void _onHorizontalDragCancel() {
+    if (_triggered) return;
+    _snapBack();
   }
 
   @override
@@ -68,21 +111,27 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
         final maxOffset = trackWidth - thumbSize - 12.0;
         final currentOffset = _dragProgress * maxOffset;
 
-        final Color borderColor = widget.isUnlocked
-            ? ParcelGlassColors.amberSignal.withValues(alpha: 0.65)
-            : (widget.isLockerOnline
-                ? ParcelGlassColors.mintSignal.withValues(alpha: 0.5)
-                : Colors.black12);
+        final Color borderColor = !widget.enabled
+            ? Colors.black12
+            : (widget.isUnlocked
+                ? ParcelGlassColors.amberSignal.withValues(alpha: 0.65)
+                : (widget.isLockerOnline
+                    ? ParcelGlassColors.mintSignal.withValues(alpha: 0.5)
+                    : Colors.black12));
 
-        final Color trackBgColor = widget.isUnlocked
-            ? ParcelGlassColors.amberSignal.withValues(alpha: 0.16)
-            : Colors.black.withValues(alpha: 0.05);
+        final Color trackBgColor = !widget.enabled
+            ? Colors.black.withValues(alpha: 0.04)
+            : (widget.isUnlocked
+                ? ParcelGlassColors.amberSignal.withValues(alpha: 0.16)
+                : Colors.black.withValues(alpha: 0.05));
 
-        final Color thumbColor = widget.isUnlocked
-            ? ParcelGlassColors.amberSignal
-            : (widget.isLockerOnline
-                ? ParcelGlassColors.mintSignal
-                : Colors.grey.shade400);
+        final Color thumbColor = !widget.enabled
+            ? Colors.grey.shade400
+            : (widget.isUnlocked
+                ? ParcelGlassColors.amberSignal
+                : (widget.isLockerOnline
+                    ? ParcelGlassColors.mintSignal
+                    : Colors.grey.shade400));
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(32),
@@ -100,7 +149,7 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
               alignment: Alignment.centerLeft,
               children: [
                 // Active fill bar that expands as user drags
-                if (!widget.isUnlocked && widget.isLockerOnline)
+                if (!widget.isUnlocked && widget.isLockerOnline && widget.enabled)
                   Positioned(
                     left: 0,
                     top: 0,
@@ -128,66 +177,92 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
                     child: Center(
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: widget.isUnlocking
-                            ? const Row(
+                        child: !widget.enabled
+                            ? Row(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.2,
-                                      color: ParcelGlassColors.mintSignal,
-                                    ),
+                                  Icon(
+                                    widget.isChecking ? Icons.sync_rounded : Icons.cloud_off_rounded,
+                                    size: 14,
+                                    color: Colors.black38,
                                   ),
-                                  SizedBox(width: 10),
+                                  const SizedBox(width: 6),
                                   Text(
-                                    'OPENING SOLENOID LOCK...',
-                                    style: TextStyle(
-                                      color: ParcelGlassColors.mintSignal,
+                                    widget.isChecking
+                                        ? 'CHECKING SERVER...'
+                                        : (!widget.isLockerOnline
+                                            ? 'LOCKER OFFLINE • UNLOCK DISABLED'
+                                            : 'SERVER OFFLINE • UNLOCK DISABLED'),
+                                    style: const TextStyle(
+                                      color: Colors.black38,
                                       fontWeight: FontWeight.w900,
-                                      fontSize: 12,
-                                      letterSpacing: 1.2,
+                                      fontSize: 11,
+                                      letterSpacing: 0.8,
                                     ),
                                   ),
                                 ],
                               )
-                            : widget.isUnlocked
+                            : widget.isUnlocking
                                 ? const Row(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
-                                        Icons.lock_open_rounded,
-                                        color: ParcelGlassColors.amberSignal,
-                                        size: 18,
+                                      SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.2,
+                                          color: ParcelGlassColors.mintSignal,
+                                        ),
                                       ),
-                                      SizedBox(width: 8),
+                                      SizedBox(width: 10),
                                       Text(
-                                        'DOOR UNLOCKED • PUSH TO LOCK',
+                                        'OPENING SOLENOID LOCK...',
                                         style: TextStyle(
-                                          color: ParcelGlassColors.amberSignal,
+                                          color: ParcelGlassColors.mintSignal,
                                           fontWeight: FontWeight.w900,
                                           fontSize: 12,
-                                          letterSpacing: 0.8,
+                                          letterSpacing: 1.2,
                                         ),
                                       ),
                                     ],
                                   )
-                                : Text(
-                                    widget.isLockerOnline
-                                        ? 'SLIDE TO UNLOCK DOOR ➔'
-                                        : 'LOCKER IS OFFLINE',
-                                    style: TextStyle(
-                                      color: widget.isLockerOnline
-                                          ? primaryTextColor.withValues(alpha: (0.7 - (_dragProgress * 0.5)).clamp(0.0, 1.0))
-                                          : Colors.black38,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 12,
-                                      letterSpacing: 1.2,
-                                    ),
-                                  ),
+                                : widget.isUnlocked
+                                    ? const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.lock_open_rounded,
+                                            color: ParcelGlassColors.amberSignal,
+                                            size: 18,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'DOOR UNLOCKED • PUSH TO LOCK',
+                                            style: TextStyle(
+                                              color: ParcelGlassColors.amberSignal,
+                                              fontWeight: FontWeight.w900,
+                                              fontSize: 12,
+                                              letterSpacing: 0.8,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Text(
+                                        widget.isLockerOnline
+                                            ? 'SLIDE TO UNLOCK DOOR ➔'
+                                            : 'LOCKER IS OFFLINE',
+                                        style: TextStyle(
+                                          color: widget.isLockerOnline
+                                              ? primaryTextColor.withValues(alpha: (0.7 - (_dragProgress * 0.5)).clamp(0.0, 1.0))
+                                              : Colors.black38,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 12,
+                                          letterSpacing: 1.2,
+                                        ),
+                                      ),
                       ),
                     ),
                   ),
@@ -200,8 +275,10 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock> {
                   bottom: 6,
                   child: RepaintBoundary(
                     child: GestureDetector(
+                      onHorizontalDragStart: _onHorizontalDragStart,
                       onHorizontalDragUpdate: (d) => _onHorizontalDragUpdate(d, trackWidth),
                       onHorizontalDragEnd: _onHorizontalDragEnd,
+                      onHorizontalDragCancel: _onHorizontalDragCancel,
                       child: Container(
                         width: thumbSize,
                         height: thumbSize,

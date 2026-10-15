@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   User,
   Phone,
@@ -8,8 +8,11 @@ import {
   ArrowLeft,
   Loader2,
   Check,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { ShippingLabelHeader } from "./ShippingLabelHeader";
+import { CompanyFooter } from "./CompanyFooter";
 
 interface RegisterWizardProps {
   step: number;
@@ -58,6 +61,9 @@ export function RegisterWizard({
   onSubmit,
   onSwitchToLogin,
 }: RegisterWizardProps) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const stepTitles: Record<number, { title: string; sub: string }> = {
     1: { title: "Step 1: Recipient", sub: "Enter your contact details" },
     2: { title: "Step 2: Verification", sub: "Verify Indian mobile number" },
@@ -72,7 +78,7 @@ export function RegisterWizard({
       />
 
       {/* Auth Tab Switcher */}
-      <div className="flex border border-[#3D2310]/30 bg-zinc-100 font-mono text-[10px] uppercase font-black tracking-wider mt-1 mb-1">
+      <div className="flex border border-[#3D2310]/30 bg-zinc-100 font-mono text-[10px] uppercase font-black tracking-wider mt-1 mb-2">
         <button
           type="button"
           onClick={onSwitchToLogin}
@@ -88,7 +94,7 @@ export function RegisterWizard({
         </button>
       </div>
 
-      <form onSubmit={onSubmit} className="flex-1 flex flex-col justify-center py-2 space-y-3">
+      <form onSubmit={onSubmit} className="flex flex-col space-y-2.5 pt-1.5">
         {/* Step 1: Name & Optional Email */}
         {step === 1 && (
           <div className="space-y-3 text-left">
@@ -192,14 +198,29 @@ export function RegisterWizard({
               <div className="relative">
                 <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   disabled={loading}
                   value={password}
                   onChange={(e) => onPasswordChange(e.target.value)}
                   placeholder="Minimum 6 characters"
-                  className="w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono tracking-widest"
+                  className={`w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-10 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono ${
+                    showPassword ? "tracking-normal font-sans" : "tracking-widest"
+                  }`}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#3D2310] transition-colors p-1 flex items-center justify-center cursor-pointer"
+                  title={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -210,14 +231,29 @@ export function RegisterWizard({
               <div className="relative">
                 <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
-                  type="password"
+                  type={showConfirmPassword ? "text" : "password"}
                   required
                   disabled={loading}
                   value={confirmPassword}
                   onChange={(e) => onConfirmPasswordChange(e.target.value)}
                   placeholder="Re-enter password"
-                  className="w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono tracking-widest"
+                  className={`w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-10 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono ${
+                    showConfirmPassword ? "tracking-normal font-sans" : "tracking-widest"
+                  }`}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-[#3D2310] transition-colors p-1 flex items-center justify-center cursor-pointer"
+                  title={showConfirmPassword ? "Hide password" : "Show password"}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -288,21 +324,23 @@ export function RegisterWizard({
             </button>
           )}
         </div>
+        {/* Switch to Login - Right below navigation buttons */}
+        <div className="pt-2 text-center">
+          <p className="text-xs text-zinc-600">
+            Already registered?{" "}
+            <button
+              type="button"
+              onClick={onSwitchToLogin}
+              className="font-black text-[#3D2310] underline underline-offset-2 hover:text-[#2B1810] ml-1 cursor-pointer"
+            >
+              Sign In to existing account
+            </button>
+          </p>
+        </div>
       </form>
 
-      {/* Switch to Login */}
-      <div className="pt-2 border-t-2 border-dashed border-[#3D2310]/30 text-center">
-        <p className="text-[11px] text-zinc-600">
-          Already registered?{" "}
-          <button
-            type="button"
-            onClick={onSwitchToLogin}
-            className="font-bold text-[#3D2310] hover:underline underline-offset-2 ml-1 cursor-pointer"
-          >
-            Sign in to existing account
-          </button>
-        </p>
-      </div>
+      {/* Company & Project Information at the very bottom */}
+      <CompanyFooter />
     </div>
   );
 }

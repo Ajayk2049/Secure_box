@@ -52,7 +52,7 @@ export class SMSService {
 
     // Demo mode bypass: only when DEMO_MODE=true is explicitly configured in .env
     if (this.isDemoMode) {
-      console.log(`🧪 [SMS Demo Mode] Simulated SMS dispatch for ${this.maskPhone(cleanPhone)}. DEMO OTP: 123456`);
+      console.log(`[SMS DEMO] Simulated SMS dispatch for ${this.maskPhone(cleanPhone)}. DEMO OTP: 123456`);
       return { success: true, messageId: "demo_msg_" + Date.now(), isDemo: true };
     }
 
@@ -65,7 +65,7 @@ export class SMSService {
       },
     };
 
-    console.log(`📲 [SMS Dispatch] Sending OTP to ${this.maskPhone(cleanPhone)} via StartMessaging...`);
+    console.log(`[SMS DISPATCH] Sending OTP to ${this.maskPhone(cleanPhone)} via StartMessaging...`);
 
     try {
       const response = await fetch("https://api.startmessaging.com/otp/send", {
@@ -80,7 +80,7 @@ export class SMSService {
       const data = (await response.json()) as any;
 
       if (!response.ok) {
-        console.error(`❌ StartMessaging API error (${response.status}):`, data);
+        console.error(`[SMS ERROR] StartMessaging API error (${response.status}):`, data);
         if (response.status === 401) {
           throw new Error("SMS configuration error: Invalid StartMessaging API Key");
         } else if (response.status === 402) {
@@ -91,10 +91,10 @@ export class SMSService {
         throw new Error(data?.message || "Failed to send OTP via SMS provider");
       }
 
-      console.log(`✅ [SMS Success] OTP dispatched to ${this.maskPhone(cleanPhone)}. MessageId: ${data.messageId || "N/A"}`);
+      console.log(`[SMS OK] OTP dispatched to ${this.maskPhone(cleanPhone)}. MessageId: ${data.messageId || "N/A"}`);
       return { success: true, messageId: data.messageId };
     } catch (err: any) {
-      console.error("❌ SMSService sendOtp exception:", err.message);
+      console.error("[SMS ERROR] SMSService sendOtp exception:", err.message);
       throw err;
     }
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user.model.dart';
 import '../services/api_service.dart';
 import '../services/secure_storage.dart';
+import '../services/websocket_service.dart';
 
 class AuthViewModel extends ChangeNotifier {
   final ApiService _api = ApiService();
@@ -25,6 +26,13 @@ class AuthViewModel extends ChangeNotifier {
     _loading = true;
     notifyListeners();
 
+    // Listen for global session expiry events triggered by 401 responses
+    ApiService.onSessionExpired.stream.listen((message) {
+      _user = null;
+      _error = message;
+      notifyListeners();
+    });
+
     try {
       _savedIdentifier = await _storage.getSavedIdentifier();
 
@@ -36,13 +44,23 @@ class AuthViewModel extends ChangeNotifier {
             _user = UserModel.fromJson(res['user']);
             await _storage.saveUserData(jsonEncode(res['user']));
           }
-        } catch (_) {
-          // If offline, attempt to load cached profile from secure storage
-          final cached = await _storage.getUserData();
-          if (cached != null) {
-            try {
-              _user = UserModel.fromJson(jsonDecode(cached));
-            } catch (_) {}
+        } catch (e) {
+          final errStr = e.toString().toLowerCase();
+          final is401 = errStr.contains('401') || errStr.contains('unauthorized');
+          if (is401) {
+            // Token is expired / revoked: clean dead credentials and notify user
+            await _storage.deleteToken();
+            await _storage.deleteRefreshToken();
+            _user = null;
+            _error = "Your session has expired. Please sign in again.";
+          } else {
+            // Truly offline: restore cached profile
+            final cached = await _storage.getUserData();
+            if (cached != null) {
+              try {
+                _user = UserModel.fromJson(jsonDecode(cached));
+              } catch (_) {}
+            }
           }
         }
       }
@@ -102,6 +120,7 @@ class AuthViewModel extends ChangeNotifier {
         await _storage.saveUserData(jsonEncode(response['user']));
         _user = UserModel.fromJson(response['user']);
       }
+      WebSocketService().reconnectWithNewToken(response['token']);
       _loading = false;
       notifyListeners();
       return true;
@@ -131,6 +150,7 @@ class AuthViewModel extends ChangeNotifier {
         await _storage.saveUserData(jsonEncode(response['user']));
         _user = UserModel.fromJson(response['user']);
       }
+      WebSocketService().reconnectWithNewToken(response['token']);
       _loading = false;
       notifyListeners();
       return true;
@@ -165,6 +185,7 @@ class AuthViewModel extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    WebSocketService().disconnect();
     await _api.logout();
     await _storage.purgeAllSessionData();
     _user = null;

@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { FastifyRequest, FastifyReply } from "fastify";
 import mongoose from "mongoose";
 import { Device } from "../models/Device.model.js";
@@ -7,6 +6,9 @@ import { User } from "../models/User.model.js";
 import { SlotRequest } from "../models/SlotRequest.model.js";
 import { SystemConfig } from "../models/SystemConfig.model.js";
 import { wsService } from "../services/websocket.service.js";
+
+// Re-export invite code generation and join handlers from decomposed module
+export * from "./deviceInvite.controller.js";
 
 function isAuthorizedUser(device: any, userId: string): boolean {
   const isOwner = device.ownerId?.toString() === userId || device.ownerId?._id?.toString() === userId;
@@ -129,167 +131,7 @@ export async function removeCoOwner(request: FastifyRequest, reply: FastifyReply
   });
 }
 
-// 3. Create Co-Owner Join/Invite Code
-export async function createInviteCode(request: FastifyRequest, reply: FastifyReply) {
-  const { id } = request.params as { id: string };
-  const user = request.user as { id: string };
-
-  const device = await findDeviceByIdOrDeviceId(id);
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
-
-  if (device.ownerId.toString() !== user.id) {
-    return reply.status(403).send({ error: "Only the primary owner can generate invite codes" });
-  }
-
-  const maxAllowed = device.allowedSlots || 2;
-  const currentOccupied = 1 + (device.coOwners ? device.coOwners.length : 0);
-
-  if (currentOccupied >= maxAllowed) {
-    return reply.status(403).send({
-      error: `All ${maxAllowed} slots are occupied. Upgrade slots via admin to invite more users.`,
-    });
-  }
-
-  // If device already has an active, valid invite code (valid for > 60s), reuse it!
-  if (device.inviteCode && device.inviteExpiresAt && device.inviteExpiresAt > new Date(Date.now() + 60 * 1000)) {
-    return reply.send({
-      success: true,
-      inviteCode: device.inviteCode,
-      expiresAt: device.inviteExpiresAt,
-      expiresInSeconds: Math.floor((device.inviteExpiresAt.getTime() - Date.now()) / 1000),
-      message: `Share code ${device.inviteCode} with your co-owner. Valid for 24 hours.`,
-    });
-  }
-
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = crypto.randomBytes(6);
-  let randomSuffix = "";
-  for (let i = 0; i < 6; i++) {
-    randomSuffix += chars[bytes[i] % chars.length];
-  }
-  const inviteCode = `SBX-${randomSuffix}`;
-  const inviteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-  device.inviteCode = inviteCode;
-  device.inviteExpiresAt = inviteExpiresAt;
-  await device.save();
-
-  return reply.send({
-    success: true,
-    inviteCode,
-    expiresAt: inviteExpiresAt,
-    expiresInSeconds: 86400,
-    message: `Share code ${inviteCode} with your co-owner. Valid for 24 hours.`,
-  });
-}
-
-// 4. Cancel Invite Code
-export async function cancelInviteCode(request: FastifyRequest, reply: FastifyReply) {
-  const { id } = request.params as { id: string };
-  const user = request.user as { id: string };
-
-  const device = await findDeviceByIdOrDeviceId(id);
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
-
-  if (device.ownerId.toString() !== user.id) {
-    return reply.status(403).send({ error: "Only the primary owner can revoke invite codes" });
-  }
-
-  device.inviteCode = undefined;
-  device.inviteExpiresAt = undefined;
-  await device.save();
-
-  return reply.send({ success: true, message: "Invite code successfully revoked" });
-}
-
-// 5. Join Device via Invite Code
-export async function joinDevice(request: FastifyRequest, reply: FastifyReply) {
-  const user = request.user as { id: string };
-  const { inviteCode } = request.body as { inviteCode?: string };
-
-  if (!inviteCode) {
-    return reply.status(400).send({ error: "inviteCode is required" });
-  }
-
-  const cleanCode = inviteCode.trim().toUpperCase();
-  const rawAlphanumeric = cleanCode.replace(/[^A-Z0-9]/g, "");
-  const normalizedWithPrefix = rawAlphanumeric.startsWith("SBX")
-    ? `SBX-${rawAlphanumeric.substring(3)}`
-    : `SBX-${rawAlphanumeric}`;
-
-  const device = await Device.findOne({
-    $or: [
-      { inviteCode: cleanCode },
-      { inviteCode: normalizedWithPrefix },
-      { inviteCode: rawAlphanumeric },
-    ],
-    inviteExpiresAt: { $gt: new Date() },
-  });
-
-  if (!device) {
-    return reply.status(404).send({ error: "Invalid or expired invite code. Please ask the owner for a new code." });
-  }
-
-  if (device.ownerId.toString() === user.id) {
-    return reply.status(400).send({ error: "You are already the primary owner of this device" });
-  }
-
-  if (device.coOwners.some((cId) => cId.toString() === user.id)) {
-    return reply.status(409).send({ error: "You are already a co-owner of this device" });
-  }
-
-  const maxAllowed = device.allowedSlots || 2;
-  const currentOccupied = 1 + (device.coOwners ? device.coOwners.length : 0);
-
-  if (currentOccupied >= maxAllowed) {
-    return reply.status(403).send({ error: "This device has already reached its user slot capacity" });
-  }
-
-  const userObjectId = new mongoose.Types.ObjectId(user.id);
-  device.coOwners.push(userObjectId);
-  device.inviteCode = undefined;
-  device.inviteExpiresAt = undefined;
-  await device.save();
-
-  // Also record on user model
-  await User.findByIdAndUpdate(user.id, {
-    $addToSet: { assignedDevices: device.deviceId },
-  });
-
-  const dbUser = await User.findById(user.id);
-  const joinerName = dbUser?.name || dbUser?.email || "Co-Owner";
-
-  await Log.create({
-    deviceId: device._id,
-    action: "co_owner_added",
-    metadata: {
-      coOwnerId: user.id,
-      userName: joinerName,
-      userRole: "Co-Owner",
-      method: "join_code",
-    },
-  });
-
-  return reply.send({
-    success: true,
-    message: `Successfully joined '${device.name}' as a co-owner!`,
-    device: {
-      id: device._id,
-      deviceId: device.deviceId,
-      name: device.name,
-      doorState: device.doorState,
-      online: device.online,
-      isOwner: false,
-      userRole: "Co-Owner",
-    },
-  });
-}
-
-// 6. Get Slot Summary
+// 3. Get Slot Summary
 export async function getDeviceSlots(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
   const user = request.user as { id: string };
@@ -342,7 +184,7 @@ export async function getDeviceSlots(request: FastifyRequest, reply: FastifyRepl
   });
 }
 
-// 7. Rename Co-Owner Alias
+// 4. Rename Co-Owner Alias
 export async function renameCoOwner(request: FastifyRequest, reply: FastifyReply) {
   const { id, userId } = request.params as { id: string; userId: string };
   const user = request.user as { id: string };
@@ -379,7 +221,7 @@ export async function renameCoOwner(request: FastifyRequest, reply: FastifyReply
   });
 }
 
-// 8. Request Slot Upgrade (User sends request to Admin to unlock all 3 extra slots to 5 total)
+// 5. Request Slot Upgrade (User sends request to Admin to unlock all 3 extra slots to 5 total)
 export async function requestSlotUpgrade(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
   const user = request.user as { id: string };
@@ -469,5 +311,3 @@ export async function requestSlotUpgrade(request: FastifyRequest, reply: Fastify
     request: slotReq,
   });
 }
-
-

@@ -108,49 +108,57 @@ export default function Home() {
             <span className="font-black text-3xl md:text-[5vh] tracking-tight">Secure Box</span>
           </div>
 
-          {/* Navigation Links */}
+          {/* Navigation Links: Hidden on Home view, revealed when navigating sub-views */}
           <nav className="flex flex-wrap justify-center items-center gap-4 md:gap-[5vh] font-merriweather">
-            <a
-              href="#features"
-              onClick={(e) => {
-                e.preventDefault();
-                transitionTo("features");
-              }}
-              className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] transition-colors duration-200 group"
+            <div
+              className={`flex items-center gap-4 md:gap-[5vh] transition-all duration-350 ease-in-out ${
+                view !== "home"
+                  ? "opacity-100 translate-x-0 max-w-[600px] pointer-events-auto"
+                  : "opacity-0 -translate-x-3 max-w-0 overflow-hidden pointer-events-none"
+              }`}
             >
-              Features
-              <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
-                view === "features" ? "w-full" : "w-0 group-hover:w-full"
-              }`} />
-            </a>
+              <a
+                href="#features"
+                onClick={(e) => {
+                  e.preventDefault();
+                  transitionTo("features");
+                }}
+                className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] whitespace-nowrap transition-colors duration-200 group"
+              >
+                Features
+                <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
+                  view === "features" ? "w-full" : "w-0 group-hover:w-full"
+                }`} />
+              </a>
 
-            <a
-              href="#how-it-works"
-              onClick={(e) => {
-                e.preventDefault();
-                transitionTo("how-it-works");
-              }}
-              className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] transition-colors duration-200 group"
-            >
-              How it works
-              <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
-                view === "how-it-works" ? "w-full" : "w-0 group-hover:w-full"
-              }`} />
-            </a>
+              <a
+                href="#how-it-works"
+                onClick={(e) => {
+                  e.preventDefault();
+                  transitionTo("how-it-works");
+                }}
+                className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] whitespace-nowrap transition-colors duration-200 group"
+              >
+                How it works
+                <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
+                  view === "how-it-works" ? "w-full" : "w-0 group-hover:w-full"
+                }`} />
+              </a>
 
-            <a
-              href="#signin"
-              onClick={(e) => {
-                e.preventDefault();
-                transitionTo("profile", "login");
-              }}
-              className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] transition-colors duration-200 group"
-            >
-              Sign In
-              <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
-                view === "profile" && profileMode === "login" ? "w-full" : "w-0 group-hover:w-full"
-              }`} />
-            </a>
+              <a
+                href="#signin"
+                onClick={(e) => {
+                  e.preventDefault();
+                  transitionTo("profile", "login");
+                }}
+                className="relative py-[0.5vh] text-base md:text-[2.6vh] font-black text-[#3D2310] whitespace-nowrap transition-colors duration-200 group"
+              >
+                Sign In
+                <span className={`absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] bg-[#3D2310] rounded-full transition-all duration-350 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
+                  view === "profile" && profileMode === "login" ? "w-full" : "w-0 group-hover:w-full"
+                }`} />
+              </a>
+            </div>
           </nav>
         </header>
 

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Box, Lock, Mail, ShieldCheck, AlertCircle, ArrowRight, Loader2, Sun, Moon } from "lucide-react";
+import { Box, Lock, Mail, AlertCircle, ArrowRight, Loader2, Sun, Moon, Eye, EyeOff } from "lucide-react";
+import { getApiUrl } from "@/lib/api";
 
 interface LoginViewProps {
   onLoginSuccess: (user: any, token: string) => void;
@@ -12,6 +13,7 @@ interface LoginViewProps {
 export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: LoginViewProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,12 +22,7 @@ export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: Lo
     setError(null);
     setLoading(true);
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiUrl) {
-      setError("Configuration Error: NEXT_PUBLIC_API_URL must be defined in .env");
-      setLoading(false);
-      return;
-    }
+    const apiUrl = getApiUrl();
 
     try {
       const res = await fetch(`${apiUrl}/auth/login`, {
@@ -125,13 +122,26 @@ export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: Lo
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-sm rounded-none bg-slate-50 dark:bg-[#080D14] border border-slate-300 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#00F5A0] focus:ring-1 focus:ring-[#00F5A0] transition-colors"
+                  className="w-full pl-10 pr-10 py-2.5 text-sm rounded-none bg-slate-50 dark:bg-[#080D14] border border-slate-300 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#00F5A0] focus:ring-1 focus:ring-[#00F5A0] transition-colors"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-1 flex items-center justify-center cursor-pointer"
+                  title={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -153,11 +163,6 @@ export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: Lo
               )}
             </button>
           </form>
-        </div>
-
-        <div className="flex items-center justify-center gap-2 text-slate-400 text-sm">
-          <ShieldCheck className="w-4 h-4 text-[#00F5A0]" />
-          <span>Encrypted JWT Authentication</span>
         </div>
       </div>
     </div>

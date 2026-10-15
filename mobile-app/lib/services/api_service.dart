@@ -1,17 +1,22 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import '../config.dart';
+import 'api_error_handler.dart';
 import 'secure_storage.dart';
+import 'websocket_service.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();
 
+  static final StreamController<String> onSessionExpired = StreamController<String>.broadcast();
+
   Dio get _client {
     return Dio(BaseOptions(
       baseUrl: AppConfig.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 4),
     ));
   }
 
@@ -21,8 +26,8 @@ class ApiService {
     final token = await _storage.getToken();
     final dio = Dio(BaseOptions(
       baseUrl: AppConfig.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 4),
       headers: {
         if (token != null) 'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
@@ -50,6 +55,9 @@ class ApiService {
                     await _storage.saveRefreshToken(newRefreshToken);
                   }
 
+                  // Immediately reconnect WebSocket with the rotated access token
+                  WebSocketService().reconnectWithNewToken(newToken);
+
                   // Retry the original failed request with the new access token
                   final opts = error.requestOptions;
                   opts.headers['Authorization'] = 'Bearer $newToken';
@@ -66,8 +74,13 @@ class ApiService {
                 }
               }
             } catch (_) {
-              // Token refresh failed or revoked, proceed with error
+              // Token refresh failed or revoked
             }
+
+            // Both access and refresh tokens are invalid or expired
+            await _storage.deleteToken();
+            await _storage.deleteRefreshToken();
+            onSessionExpired.add("Your session has expired. Please sign in again.");
           }
           return handler.next(error);
         },
@@ -77,48 +90,22 @@ class ApiService {
     return dio;
   }
 
-  // 0. Quick local Wi-Fi connection check
-  Future<bool> checkHealth([String? host]) async {
+  // 0. Quick local Wi-Fi connection check with snappy timeout
+  Future<bool> checkHealth([String? host, Duration timeout = const Duration(milliseconds: 1500)]) async {
     final targetUrl = host != null
         ? 'http://${host.replaceAll('http://', '').replaceAll('/', '')}/api/health'
         : '${AppConfig.baseUrl}/api/health';
     try {
-      final res = await Dio(BaseOptions(connectTimeout: const Duration(seconds: 4)))
-          .get(targetUrl);
+      final res = await Dio(BaseOptions(
+        connectTimeout: timeout,
+        receiveTimeout: timeout,
+      )).get(targetUrl);
       return res.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  // Helper to extract clean, friendly error messages from Dio exceptions
-  String extractErrorMessage(dynamic error, [String defaultMessage = 'An unexpected error occurred']) {
-    if (error is DioException) {
-      if (error.response?.data != null) {
-        final data = error.response!.data;
-        if (data is Map) {
-          if (data['error'] != null && data['error'].toString().isNotEmpty) {
-            return data['error'].toString();
-          }
-          if (data['message'] != null && data['message'].toString().isNotEmpty) {
-            return data['message'].toString();
-          }
-        } else if (data is String && data.isNotEmpty) {
-          return data;
-        }
-      }
-      if (error.type == DioExceptionType.connectionTimeout ||
-          error.type == DioExceptionType.receiveTimeout ||
-          error.type == DioExceptionType.sendTimeout) {
-        return 'Connection timed out. Check your local Wi-Fi and server IP.';
-      }
-      if (error.type == DioExceptionType.connectionError) {
-        return 'Cannot connect to server at ${AppConfig.baseUrl}. Please verify your Wi-Fi network and IP settings.';
-      }
-    }
-    final str = error.toString().replaceAll('Exception: ', '').trim();
-    return str.isNotEmpty ? str : defaultMessage;
-  }
 
   // 1. Smart Pre-Check & Send OTP
   Future<Map<String, dynamic>> sendOtp(String phone) async {

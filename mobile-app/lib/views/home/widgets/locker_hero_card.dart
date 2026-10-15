@@ -6,6 +6,8 @@ import '../../widgets/liquid_slide_to_unlock.dart';
 class LockerHeroCard extends StatelessWidget {
   final DeviceModel device;
   final bool isUnlocking;
+  final bool isOffline;
+  final bool isChecking;
   final Future<void> Function() onUnlock;
   final VoidCallback onInviteCoOwner;
 
@@ -13,13 +15,15 @@ class LockerHeroCard extends StatelessWidget {
     super.key,
     required this.device,
     required this.isUnlocking,
+    this.isOffline = false,
+    this.isChecking = false,
     required this.onUnlock,
     required this.onInviteCoOwner,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isOnline = device.online;
+    final isOnline = !isOffline && !isChecking && device.online;
     final isDoorOpen = device.doorState.toLowerCase() == 'open';
 
     return LiquidParcelCard(
@@ -103,12 +107,16 @@ class LockerHeroCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: isOnline
-                      ? ParcelGlassColors.mintSignal.withValues(alpha: 0.15)
-                      : Colors.amber.withValues(alpha: 0.2),
+                  color: isChecking
+                      ? Colors.grey.withValues(alpha: 0.15)
+                      : (isOnline
+                          ? ParcelGlassColors.mintSignal.withValues(alpha: 0.15)
+                          : Colors.amber.withValues(alpha: 0.2)),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isOnline ? ParcelGlassColors.mintSignal : Colors.amber,
+                    color: isChecking
+                        ? Colors.grey.shade400
+                        : (isOnline ? ParcelGlassColors.mintSignal : Colors.amber),
                   ),
                 ),
                 child: Row(
@@ -118,15 +126,19 @@ class LockerHeroCard extends StatelessWidget {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: isOnline ? ParcelGlassColors.mintSignal : Colors.amber,
+                        color: isChecking
+                            ? Colors.grey.shade600
+                            : (isOnline ? ParcelGlassColors.mintSignal : Colors.amber),
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      isOnline ? 'ONLINE' : 'OFFLINE',
+                      isChecking ? 'CHECKING...' : (isOnline ? 'ONLINE' : 'OFFLINE'),
                       style: TextStyle(
-                        color: isOnline ? ParcelGlassColors.mintSignal : const Color(0xFFB45309),
+                        color: isChecking
+                            ? Colors.grey.shade700
+                            : (isOnline ? ParcelGlassColors.mintSignal : const Color(0xFFB45309)),
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
                       ),
@@ -150,9 +162,10 @@ class LockerHeroCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  isDoorOpen ? '🚪' : '🔒',
-                  style: const TextStyle(fontSize: 18),
+                Icon(
+                  isDoorOpen ? Icons.meeting_room_outlined : Icons.lock_outline_rounded,
+                  size: 20,
+                  color: isDoorOpen ? ParcelGlassColors.amberSignal : ParcelGlassColors.navyTitle,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -175,6 +188,8 @@ class LockerHeroCard extends StatelessWidget {
             isUnlocking: isUnlocking,
             isLockerOnline: isOnline,
             isUnlocked: isDoorOpen,
+            enabled: !isOffline && !isChecking && isOnline,
+            isChecking: isChecking,
             onUnlock: onUnlock,
           ),
 
@@ -184,11 +199,31 @@ class LockerHeroCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
-                onPressed: onInviteCoOwner,
-                icon: const Icon(Icons.person_add_alt_1, size: 16, color: ParcelGlassColors.accentBlue),
-                label: const Text(
+                onPressed: isOffline
+                    ? () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Cannot invite co-owners while offline. Please restore connection.'),
+                            backgroundColor: ParcelGlassColors.alertRed,
+                            behavior: SnackBarBehavior.floating,
+                            margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                        );
+                      }
+                    : onInviteCoOwner,
+                icon: Icon(
+                  Icons.person_add_alt_1,
+                  size: 16,
+                  color: isOffline ? Colors.black26 : ParcelGlassColors.accentBlue,
+                ),
+                label: Text(
                   'Invite Family / Co-Owner',
-                  style: TextStyle(color: ParcelGlassColors.accentBlue, fontWeight: FontWeight.bold, fontSize: 12),
+                  style: TextStyle(
+                    color: isOffline ? Colors.black26 : ParcelGlassColors.accentBlue,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ),

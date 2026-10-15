@@ -19,7 +19,7 @@ let _env: Env;
 try {
   _env = envSchema.parse(process.env);
 } catch (error) {
-  console.error("❌ Invalid environment variables:", error);
+  console.error("[CONFIG ERROR] Invalid environment variables:", error);
   process.exit(1);
 }
 

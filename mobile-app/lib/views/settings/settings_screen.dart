@@ -80,7 +80,7 @@ class SettingsScreen extends StatelessWidget {
 
               // User Profile & Account Summary Capsule (tap to edit profile)
               GestureDetector(
-                onTap: () => EditProfileModal.show(context),
+                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                 child: SettingsProfileCard(
                   userName: userName,
                   userPhone: userPhone,
@@ -92,30 +92,35 @@ class SettingsScreen extends StatelessWidget {
               SettingCapsuleTile(
                 icon: Icons.person_outline,
                 title: 'Edit Profile',
-                subtitle: user?.email != null && user!.email.isNotEmpty
-                    ? '${user.name ?? "Name"} • ${user.email}'
-                    : 'Name, Email Address',
-                onTap: () => EditProfileModal.show(context),
+                subtitle: home.isOffline
+                    ? 'Unavailable while offline'
+                    : (user?.email != null && user!.email.isNotEmpty
+                        ? '${user.name ?? "Name"} • ${user.email}'
+                        : 'Name, Email Address'),
+                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
               ),
 
               // 2. Rename Smart Locker Box
               SettingCapsuleTile(
                 icon: Icons.edit_note,
                 title: 'Rename Locker Box',
-                subtitle: home.selectedDevice != null
-                    ? '${home.selectedDevice!.name} (${home.selectedDevice!.deviceId})'
-                    : 'Personalize your locker name',
-                onTap: () => RenameDeviceModal.show(context),
+                subtitle: home.isOffline
+                    ? 'Unavailable while offline'
+                    : (home.selectedDevice != null
+                        ? '${home.selectedDevice!.name} (${home.selectedDevice!.deviceId})'
+                        : 'Personalize your locker name'),
+                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => RenameDeviceModal.show(context),
               ),
 
               // 3. Manage Users
               SettingCapsuleTile(
                 icon: Icons.people_outline,
-                title: 'Manage Users',
-                subtitle: 'Control who has access to your locker (2/5 active)',
-                onTap: () => ManageUsersDialog.show(context),
+                title: 'Manage Users & Slots',
+                subtitle: home.isOffline
+                    ? 'Unavailable while offline'
+                    : 'Control who has access to your locker (2/5 active)',
+                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => ManageUsersDialog.show(context),
               ),
-
 
               // 4. Device & Network
               SettingCapsuleTile(
@@ -162,6 +167,18 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showOfflineWarning(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('This action is unavailable while the server is offline.'),
+        backgroundColor: ParcelGlassColors.alertRed,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }
