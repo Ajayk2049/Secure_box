@@ -59,7 +59,7 @@ const char* WIFI_PASSWORD = "Your_WiFi_Password";
 
 // 2. Server Host & Port (LAN IP or Public VPS IP)
 const char* SERVER_HOST   = "192.168.1.100";  // Or your VPS IP: "103.xxx.xxx.xxx"
-const int   SERVER_PORT   = 4300;             // Backend Fastify port
+const int   SERVER_PORT   = 7000;             // Backend Fastify port
 
 // 3. Unique Locker Identity & Key (Obtained from Admin Dashboard when locker is provisioned)
 const char* DEVICE_ID     = "BOX_7K4M9Q";               // Alphanumeric Serial from Admin
@@ -83,7 +83,7 @@ Save this complete code in `src/main.cpp` inside your PlatformIO project and upl
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* SERVER_HOST   = "192.168.1.100";  // LAN IP or VPS Public IP
-const int   SERVER_PORT   = 4300;             // Port
+const int   SERVER_PORT   = 7000;             // Port
 const char* DEVICE_ID     = "BOX_7K4M9Q";     // Locker Serial from Admin
 const char* DEVICE_KEY    = "sbx_live_a1b2c3d4e5f6..."; // Provision Key
 
