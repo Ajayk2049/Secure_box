@@ -15,8 +15,18 @@ export default fp(async (fastify: FastifyInstance) => {
 
   await fastify.register(cors, {
     origin: (origin, cb) => {
-      // Allow requests with no origin (like mobile apps, curl, postman, hardware simulator)
-      if (!origin) return cb(null, true);
+      // Allow requests with no origin, or non-browser/hardware origins
+      // (ESP32 WebSocketsClient defaults to "file://" or "null", mobile apps, curl, simulator)
+      if (
+        !origin ||
+        origin === "null" ||
+        origin === "file://" ||
+        origin.startsWith("file:") ||
+        origin.includes("arduino") ||
+        origin.includes("esp32")
+      ) {
+        return cb(null, true);
+      }
 
       // Check explicit allowlist
       if (allowedOrigins.includes(origin)) {
@@ -28,7 +38,7 @@ export default fp(async (fastify: FastifyInstance) => {
         const hostname = url.hostname;
 
         // 1. Allow localhost, loopback, and local network IPs
-        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
           return cb(null, true);
         }
 
@@ -42,10 +52,12 @@ export default fp(async (fastify: FastifyInstance) => {
           return cb(null, true);
         }
       } catch {
-        // Malformed origin URL
+        // Non-standard origin (e.g. IoT client or embedded webview) - allow rather than crashing
+        return cb(null, true);
       }
 
-      cb(new Error("CORS policy does not allow access from this origin"), false);
+      // Return false without throwing a 500 error on unlisted web origins
+      cb(null, false);
     },
     credentials: true,
   });
