@@ -20,7 +20,7 @@ class HomeViewModel extends ChangeNotifier {
 
   List<DeviceModel> _devices = [];
   List<LogModel> _logs = [];
-  bool _loading = false;
+  bool _loading = true;
   String? _error;
   String? _selectedDeviceId;
   bool _isFetchingLogs = false;
@@ -54,6 +54,8 @@ class HomeViewModel extends ChangeNotifier {
     if (_isInitialized) return;
     _isInitialized = true;
     _isCheckingReachability = true;
+    _loading = true;
+    notifyListeners();
 
     // Listen for global session expiry events (from 401s or WS 4401 close code)
     _sessionExpirySub?.cancel();
@@ -63,16 +65,16 @@ class HomeViewModel extends ChangeNotifier {
       notifyListeners();
     });
 
-    // 1. Immediately load cached devices from storage
-    await _loadCachedDevices();
-
-    // 2. Perform fast startup connectivity diagnosis (<1.5s)
+    // 1. Perform fast startup connectivity diagnosis (<1.5s)
     final initialIssue = await _connectivity.checkConnectivity();
     _connectionIssue = initialIssue;
     _isCheckingReachability = false;
 
     if (initialIssue != ConnectionIssue.none) {
+      // If device is offline on app start, load cached names as fallback with offline status
+      await _loadCachedDevices();
       _devices = _devices.map((d) => d.copyWith(online: false)).toList();
+      _loading = false;
       notifyListeners();
     } else {
       _ws.connect();
@@ -80,6 +82,7 @@ class HomeViewModel extends ChangeNotifier {
       _wsMessageSub = _ws.stream.listen((message) {
         _handleWebSocketMessage(message);
       });
+      // Always get fresh live status directly from the server on startup
       await fetchDevices();
     }
 

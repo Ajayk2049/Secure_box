@@ -33,6 +33,16 @@ android {
             isShrinkResources = false
         }
     }
+
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val abi = output?.filters?.find { it.filterType == "ABI" }?.identifier
+            val abiSuffix = if (abi != null) "-$abi" else ""
+            output?.outputFileName = "Secure Box$abiSuffix-${variant.name}.apk"
+        }
+    }
 }
 
 kotlin {

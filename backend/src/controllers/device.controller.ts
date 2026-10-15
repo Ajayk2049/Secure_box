@@ -36,8 +36,9 @@ export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
     const lastHb = d.lastHeartbeat ? new Date(d.lastHeartbeat).getTime() : 0;
-    // Live freshness evaluation: if device hasn't pinged in > 5.5s, report offline immediately
-    const isActuallyOnline = Boolean(d.online && (now - lastHb < 5500));
+    // Live WebSocket connection check, with 45s heartbeat window for fallback
+    const isSocketOpen = deviceSocketService.isDeviceConnected(d.deviceId);
+    const isActuallyOnline = Boolean(isSocketOpen || (d.online && (now - lastHb < 45000)));
     return {
       ...obj,
       online: isActuallyOnline,

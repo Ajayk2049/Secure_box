@@ -1,8 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AppConfig {
-  static const String defaultLocalHost = '192.168.0.102:4300';
-  static const String prodHost = 'api.yourdomain.com';
+  static const String defaultLocalHost = '72.61.141.178:7000';
+  static const String prodHost = '72.61.141.178:7000';
 
   static bool _isProd = false;
   static String _activeHost = defaultLocalHost;

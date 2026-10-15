@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Created for Inkscape (https://www.inkscape.org) - Smart Parcel Locker Icon -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+     width="848" height="848" viewBox="88 92 848 848" version="1.1" style="background-color:none">
+  <defs>
+    <!-- Cardboard background -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#D1984E"/>
+      <stop offset="50%" stop-color="#C68638"/>
+      <stop offset="100%" stop-color="#B97A2E"/>
+    </linearGradient>
+    <!-- Locker body - lighter so frame is visible around door -->
+    <linearGradient id="lockerBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4B535F"/>
+      <stop offset="12%" stop-color="#3A414C"/>
+      <stop offset="100%" stop-color="#2A2F37"/>
+    </linearGradient>
+    <!-- Top 3D face -->
+    <linearGradient id="topFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#565F6E"/>
+      <stop offset="100%" stop-color="#343A44"/>
+    </linearGradient>
+    <!-- Door - darker than body -->
+    <linearGradient id="doorGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#262C34"/>
+      <stop offset="100%" stop-color="#171B21"/>
+    </linearGradient>
+    <!-- LED -->
+    <linearGradient id="ledGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7DFFA8"/>
+      <stop offset="30%" stop-color="#00FF5E"/>
+      <stop offset="100%" stop-color="#00C846"/>
+    </linearGradient>
+    <!-- Handle -->
+    <linearGradient id="handleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#12151A"/>
+      <stop offset="55%" stop-color="#2E353F"/>
+      <stop offset="100%" stop-color="#12151A"/>
+    </linearGradient>
+
+    <filter id="lockerShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="22" result="blur"/>
+      <feOffset in="blur" dx="0" dy="22" result="offsetBlur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.45" result="color"/>
+      <feComposite in="color" in2="offsetBlur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="paperNoise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" result="n"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.06 0" in="n" result="na"/>
+      <feComposite operator="over" in2="SourceGraphic" in="na"/>
+    </filter>
+    <filter id="ledBlur" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <sodipodi:namedview inkscape:document-units="px" pagecolor="#00000000" inkscape:pageopacity="0" inkscape:deskcolor="#808080" bordercolor="#666666" showpage="true" inkscape:zoom="0.5"/>
+
+  <!-- Cardboard squircle background - NO white bg, transparent outside -->
+  <g id="background">
+    <rect x="88" y="92" width="848" height="848" rx="260" ry="260" fill="url(#bgGrad)"/>
+    <!-- subtle inner vignette -->
+    <rect x="88" y="92" width="848" height="848" rx="260" ry="260" fill="none" stroke="#8A5A22" stroke-opacity="0.25" stroke-width="2"/>
+  </g>
+
+  <!-- Locker group with drop shadow -->
+  <g id="locker" filter="url(#lockerShadow)">
+    <!-- Top 3D thickness -->
+    <path d="M 312,318 L 340,286 L 684,286 L 712,318 Z" fill="url(#topFace)" stroke="#5A6476" stroke-width="1.5" stroke-opacity="0.8"/>
+    <!-- Right top chamfer small -->
+    <path d="M 712,318 L 728,330 L 728,352 L 712,340 Z" fill="#2A2F37"/>
+
+    <!-- Main body -->
+    <rect x="276" y="312" width="472" height="472" rx="42" ry="42" fill="url(#lockerBody)" stroke="#1A1E24" stroke-width="2"/>
+    <!-- Top edge highlight -->
+    <path d="M 308,332 Q 308,322 322,322 L 702,322 Q 716,322 716,332" fill="none" stroke="#7A8699" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+    <!-- Bottom edge highlight -->
+    <rect x="276" y="312" width="472" height="472" rx="42" ry="42" fill="none" stroke="#000000" stroke-opacity="0.6" stroke-width="3"/>
+  </g>
+
+  <!-- Door inset -->
+  <g id="door">
+    <rect x="324" y="432" width="376" height="310" rx="24" ry="24" fill="#0B0D10"/>
+    <rect x="330" y="438" width="364" height="298" rx="20" ry="20" fill="url(#doorGrad)" stroke="#3A414D" stroke-width="1.5" stroke-opacity="0.8"/>
+  </g>
+
+  <!-- Green LED -->
+  <g id="led" filter="url(#ledBlur)">
+    <rect x="448" y="372" width="128" height="24" rx="12" ry="12" fill="#003311" opacity="0.9"/>
+    <rect x="452" y="374.5" width="120" height="19" rx="9.5" ry="9.5" fill="url(#ledGrad)" stroke="#063B1B" stroke-width="1.8"/>
+    <rect x="462" y="377.5" width="100" height="6" rx="3" fill="#FFFFFF" opacity="0.55"/>
+  </g>
+
+  <!-- Handle recess on right -->
+  <g id="handle">
+    <rect x="637" y="521" width="48" height="132" rx="10" fill="#0C0E11" stroke="#000000" stroke-width="1.5"/>
+    <rect x="653" y="523" width="22" height="128" rx="6" fill="url(#handleGrad)" stroke="#4A545F" stroke-width="1" stroke-opacity="0.6"/>
+    <line x1="657" y1="530" x2="657" y2="644" stroke="#6B7686" stroke-width="1.2" opacity="0.7"/>
+  </g>
+
+  <!-- Smart / WiFi icon - white -->
+  <g id="wifi" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- outer arc -->
+    <path d="M 434,542 Q 512,478 590,542" stroke-width="24" />
+    <!-- middle arc -->
+    <path d="M 463,575 Q 512,531 561,575" stroke-width="23" />
+    <!-- inner arc -->
+    <path d="M 489,606 Q 512,588 535,606" stroke-width="22" />
+    <!-- dot -->
+    <circle cx="512" cy="635" r="14" fill="#FFFFFF" stroke="none"/>
+  </g>
+
+  <!-- Soft door inner shadow bottom -->
+  <rect x="330" y="700" width="364" height="20" rx="10" fill="#000000" opacity="0.25" />
+</svg>
