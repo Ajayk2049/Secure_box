@@ -75,6 +75,29 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
+
+    if (!device.online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${device.name.isNotEmpty ? device.name : device.deviceId} is currently offline. Unlock unavailable.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      );
+      return;
+    }
     setState(() => _unlockingDeviceId = device.deviceId);
     try {
       await context.read<HomeViewModel>().unlockDevice(device.deviceId);
@@ -99,9 +122,27 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final rawMsg = e.toString().replaceAll('Exception: ', '').trim();
+        final isOffline = rawMsg.toLowerCase().contains('offline');
+        final errorText = isOffline
+            ? '${device.name.isNotEmpty ? device.name : device.deviceId} is offline. Please check device power and connection.'
+            : (rawMsg.isNotEmpty ? rawMsg : 'Unlock failed. Please try again.');
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Unlock failed: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Row(
+              children: [
+                Icon(
+                  isOffline ? Icons.cloud_off_rounded : Icons.error_outline_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(errorText),
+                ),
+              ],
+            ),
             backgroundColor: ParcelGlassColors.alertRed,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),

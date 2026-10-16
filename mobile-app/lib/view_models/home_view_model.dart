@@ -124,6 +124,17 @@ class HomeViewModel extends ChangeNotifier {
       fetchDeviceLogs(targetDeviceId);
     }
 
+    if (type == 'DEVICES_UPDATE' && message['devices'] is List) {
+      final rawList = message['devices'] as List;
+      final newDevices = rawList.map((json) => DeviceModel.fromJson(json)).toList();
+      _cacheManager.saveCachedDevices(rawList);
+      final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+      _devices = updatedDevices;
+      _loading = false;
+      notifyListeners();
+      return;
+    }
+
     const stateEvents = {
       'DEVICE_STATUS', 'DOOR_OPEN', 'EMERGENCY_UNLOCK',
       'DELIVERY_SUCCESS', 'UNLOCK_COMMAND', 'DEVICE_ONLINE', 'DEVICE_OFFLINE'
@@ -315,10 +326,12 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _api.unlockDevice(deviceId);
+      if (_ws.isConnected) {
+        await _ws.sendUnlockCommand(deviceId);
+      } else {
+        await _api.unlockDevice(deviceId);
+      }
       Future.delayed(const Duration(milliseconds: 600), () => fetchDeviceLogs(deviceId));
-      Future.delayed(const Duration(milliseconds: 1500), () => _fetchDevicesSilent());
-      Future.delayed(const Duration(seconds: 4), () => _fetchDevicesSilent());
     } catch (e) {
       _recentlyUnlockedUntil.remove(targetUpper);
       _error = e.toString();

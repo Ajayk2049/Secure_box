@@ -6,6 +6,7 @@ import { Log } from "../models/Log.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
 import { deviceSocketService } from "../services/deviceSocket.service.js";
+import { deviceStatusService } from "../services/deviceStatus.service.js";
 import { generateDeviceKey } from "./adminRequests.controller.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
@@ -35,10 +36,7 @@ export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
     const obj = { ...d };
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
-    const lastHb = d.lastHeartbeat ? new Date(d.lastHeartbeat).getTime() : 0;
-    // Live WebSocket connection check, with 45s heartbeat window for fallback
-    const isSocketOpen = deviceSocketService.isDeviceConnected(d.deviceId);
-    const isActuallyOnline = Boolean(isSocketOpen || (d.online && (now - lastHb < 45000)));
+    const isActuallyOnline = deviceStatusService.resolveDeviceOnline(d.deviceId, d.online, d.lastHeartbeat);
     return {
       ...obj,
       online: isActuallyOnline,
@@ -95,84 +93,16 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
     });
   }
 
-  let device = null;
-  if (mongoose.Types.ObjectId.isValid(id)) {
-    device = await Device.findById(id);
+  try {
+    const result = await deviceStatusService.executeUnlock(user.id, user.role || "user", id);
+    return reply.send(result);
+  } catch (err: any) {
+    const msg = err.message || "Failed to unlock device";
+    if (msg.includes("not found")) return reply.status(404).send({ error: msg });
+    if (msg.includes("Not authorized")) return reply.status(403).send({ error: msg });
+    if (msg.includes("offline")) return reply.status(409).send({ error: msg });
+    return reply.status(500).send({ error: msg });
   }
-  if (!device) {
-    device = await Device.findOne({ deviceId: id.toUpperCase() });
-  }
-
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
-
-  if (!isAuthorizedUser(device, user.id)) {
-    return reply.status(403).send({ error: "Not authorized to unlock this device" });
-  }
-
-  const isOwner = device.ownerId.toString() === user.id;
-  const dbUser = await User.findById(user.id);
-  const userName = dbUser?.name || dbUser?.email || "User";
-  const userRole = isOwner ? "Owner" : "Co-Owner";
-
-  const enqueued = commandQueueService.enqueueCommand(device.deviceId, "unlock");
-
-  // Push directly to hardware if connected via WebSocket (instant sub-millisecond dispatch)
-  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(device.deviceId, enqueued.commandId, 3000);
-
-  device.doorState = "open";
-  device.online = true;
-  await device.save();
-
-  await Log.create({
-    deviceId: device._id,
-    action: "unlock",
-    metadata: {
-      triggeredBy: user.id,
-      userName,
-      userRole,
-      userPhone: dbUser?.phone,
-      commandId: enqueued.commandId,
-      source: isDirectlyPushed ? "mobile_app_websocket_direct" : "mobile_app_queued",
-      deviceId: device.deviceId,
-    },
-  });
-
-  const unlockCommandMsg = {
-    type: "UNLOCK_COMMAND",
-    deviceId: device.deviceId,
-    commandId: enqueued.commandId,
-    unlockedBy: userName,
-    userRole,
-  };
-  wsService.broadcastToDevice(device.deviceId, unlockCommandMsg);
-
-  const statusMsg = {
-    type: "DEVICE_STATUS",
-    deviceId: device.deviceId,
-    doorState: "open",
-    doorStatus: "unlocked",
-    online: true,
-  };
-  const targets = [device.deviceId, device._id, device.ownerId, ...(device.coOwners || [])];
-  wsService.broadcastToDeviceGroup(targets, statusMsg);
-
-  return reply.send({
-    success: true,
-    message: isDirectlyPushed
-      ? "Unlock command dispatched in real-time to locker"
-      : "Unlock command queued successfully for device",
-    commandId: enqueued.commandId,
-    unlockedBy: userName,
-    userRole,
-    device: {
-      deviceId: device.deviceId,
-      name: device.name,
-      doorState: device.doorState,
-      online: device.online,
-    },
-  });
 }
 
 // 4. Get recent access & delivery logs
@@ -242,7 +172,7 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
       id: device._id,
       deviceId: device.deviceId,
       name: device.name,
-      online: device.online,
+      online: deviceStatusService.resolveDeviceOnline(device.deviceId, device.online, device.lastHeartbeat),
       doorState: device.doorState,
     },
   });

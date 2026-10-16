@@ -3,7 +3,9 @@ import mongoose from "mongoose";
 import { config } from "./config.js";
 import { checkDeviceWatchdog } from "./services/deviceWatchdog.service.js";
 import { wsService } from "./services/websocket.service.js";
+import { deviceStatusService } from "./services/deviceStatus.service.js";
 import { User } from "./models/User.model.js";
+import { Device } from "./models/Device.model.js";
 import { loggerConfig, loggerStream, isSilentTerminalPath, logFilePath, pruneLogsOlderThan24Hours } from "./logger.js";
 import { AppError, ValidationError } from "./errors/AppError.js";
 
@@ -217,6 +219,45 @@ async function bootstrap() {
         }
         if (data.type === "JOIN_ROOM" && data.deviceId) {
           await wsService.joinRoom(clientId, data.deviceId);
+          return;
+        }
+        if (data.type === "UNLOCK_DEVICE" && data.deviceId) {
+          try {
+            const result = await deviceStatusService.executeUnlock(
+              decodedUser.id,
+              decodedUser.role || "user",
+              data.deviceId,
+              typeof data.duration === "number" ? data.duration : 3000
+            );
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: true,
+              deviceId: data.deviceId,
+              message: result.message,
+              commandId: result.commandId,
+              device: result.device,
+            }));
+          } catch (unlockErr: any) {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: unlockErr.message || "Failed to unlock device",
+            }));
+          }
+          return;
+        }
+        if (data.type === "GET_DEVICES") {
+          const query = (decodedUser.role === "admin")
+            ? {}
+            : { $or: [{ ownerId: decodedUser.id }, { coOwners: decodedUser.id }] };
+          const devices = await Device.find(query).populate("ownerId", "phone email name").lean();
+          const enriched = devices.map((d: any) => deviceStatusService.enrichWithLiveStatus(d));
+          socket.send(JSON.stringify({
+            type: "DEVICES_UPDATE",
+            devices: enriched,
+          }));
+          return;
         }
       } catch (error) {
         fastify.log.error(error, "WS message parse error");

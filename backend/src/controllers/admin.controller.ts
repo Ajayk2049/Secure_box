@@ -4,6 +4,7 @@ import { Device } from "../models/Device.model.js";
 import { User } from "../models/User.model.js";
 import { Log } from "../models/Log.model.js";
 import { smsService } from "../services/sms.service.js";
+import { deviceStatusService } from "../services/deviceStatus.service.js";
 import { generateDeviceKey } from "./adminRequests.controller.js";
 
 // 1. Create a customer manually from admin
@@ -56,8 +57,10 @@ export async function getAllDevices(request: FastifyRequest, reply: FastifyReply
   const devicesWithSlotStats = devices.map((dev) => {
     const allowed = dev.allowedSlots || 2;
     const occupied = 1 + (dev.coOwners ? dev.coOwners.length : 0);
+    const isOnline = deviceStatusService.resolveDeviceOnline(dev.deviceId, dev.online, dev.lastHeartbeat);
     return {
       ...dev.toObject(),
+      online: isOnline,
       totalCapacity: 5,
       allowedSlots: allowed,
       lockedSlots: 5 - allowed,
@@ -77,19 +80,8 @@ export async function getAllUsers(request: FastifyRequest, reply: FastifyReply) 
 
 // 4. System statistics
 export async function getSystemStats(request: FastifyRequest, reply: FastifyReply) {
-  const totalDevices = await Device.countDocuments();
-  const onlineDevices = await Device.countDocuments({ online: true });
-  const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
-  const totalLogs = await Log.countDocuments();
-
-  return reply.send({
-    stats: {
-      totalDevices,
-      onlineDevices,
-      totalUsers,
-      totalLogs,
-    },
-  });
+  const stats = await deviceStatusService.getSystemLiveStats();
+  return reply.send({ stats });
 }
 
 // 5. Update device slot limits

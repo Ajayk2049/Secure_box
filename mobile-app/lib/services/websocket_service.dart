@@ -151,6 +151,65 @@ class WebSocketService {
     }
   }
 
+  /// Sends an instant unlock command over the active WebSocket connection.
+  Future<Map<String, dynamic>> sendUnlockCommand(String deviceId, [int durationMs = 3000]) async {
+    final clean = deviceId.trim().toUpperCase();
+    if (!_isConnected || _channel == null) {
+      throw Exception('WebSocket not connected');
+    }
+
+    final completer = Completer<Map<String, dynamic>>();
+
+    StreamSubscription? sub;
+    Timer? timeoutTimer;
+
+    timeoutTimer = Timer(const Duration(seconds: 8), () {
+      sub?.cancel();
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('Unlock request timed out'));
+      }
+    });
+
+    sub = stream.listen((msg) {
+      if (msg['type'] == 'UNLOCK_ACK' && (msg['deviceId']?.toString().toUpperCase() == clean)) {
+        timeoutTimer?.cancel();
+        sub?.cancel();
+        if (!completer.isCompleted) {
+          if (msg['success'] == true) {
+            completer.complete(msg);
+          } else {
+            completer.completeError(Exception(msg['error'] ?? 'Unlock command rejected'));
+          }
+        }
+      }
+    });
+
+    try {
+      _channel?.sink.add(jsonEncode({
+        'type': 'UNLOCK_DEVICE',
+        'deviceId': clean,
+        'duration': durationMs,
+      }));
+    } catch (e) {
+      timeoutTimer.cancel();
+      sub.cancel();
+      if (!completer.isCompleted) {
+        completer.completeError(e);
+      }
+    }
+
+    return completer.future;
+  }
+
+  /// Requests fresh live device statuses over WebSocket without HTTP polling.
+  void requestDevices() {
+    if (_isConnected && _channel != null) {
+      try {
+        _channel?.sink.add(jsonEncode({'type': 'GET_DEVICES'}));
+      } catch (_) {}
+    }
+  }
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;

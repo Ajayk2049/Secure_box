@@ -81,10 +81,19 @@ class DeviceSocketService {
 
     console.log(`[DEVICE-WS] Hardware connected: ${cleanId}`);
 
-    // Update MongoDB status to online
+    // Update MongoDB status to online with connection timestamp
     deviceDoc.online = true;
     deviceDoc.lastHeartbeat = now;
+    deviceDoc.lastConnectedAt = now;
     await deviceDoc.save().catch(() => { });
+
+    // Create persistent activity log record
+    await Log.create({
+      deviceId: deviceDoc._id,
+      action: "device_online",
+      timestamp: now,
+      metadata: { source: "esp32_websocket", deviceId: cleanId },
+    }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_online for ${cleanId}:`, err));
 
     // Broadcast real-time online status to users & admins
     const targets = [cleanId, deviceDoc._id, deviceDoc.ownerId, ...(deviceDoc.coOwners || [])];
@@ -121,14 +130,23 @@ class DeviceSocketService {
     try {
       const device = await Device.findOne({ deviceId: cleanId });
       if (device) {
+        const disconnectTime = new Date();
         device.online = false;
+        device.lastDisconnectedAt = disconnectTime;
         await device.save();
+
+        await Log.create({
+          deviceId: device._id,
+          action: "device_offline",
+          timestamp: disconnectTime,
+          metadata: { source: "esp32_websocket_disconnect", deviceId: cleanId },
+        }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_offline for ${cleanId}:`, err));
 
         const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
         wsService.broadcastToDeviceGroup(targets, {
           type: "DEVICE_OFFLINE",
           deviceId: cleanId,
-          timestamp: new Date().toISOString(),
+          timestamp: disconnectTime.toISOString(),
         });
       }
     } catch (err) {

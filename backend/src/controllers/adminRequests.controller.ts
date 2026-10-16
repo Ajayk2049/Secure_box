@@ -4,6 +4,7 @@ import { LockerRequest } from "../models/LockerRequest.model.js";
 import { User } from "../models/User.model.js";
 import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
+import { deviceStatusService } from "../services/deviceStatus.service.js";
 
 // Generates a cryptographically random, unguessable alphanumeric device ID like BOX_7K4M9Q
 export async function generateSecureDeviceId(): Promise<string> {
@@ -91,10 +92,11 @@ export async function getAllRequests(request: FastifyRequest, reply: FastifyRepl
     const obj = { ...req };
     const assignedDevicesInfo = (req.assignedDeviceIds || []).map((id: string) => {
       const d: any = deviceMap.get(id);
+      const isOnline = d ? deviceStatusService.resolveDeviceOnline(id, d.online, d.lastHeartbeat) : false;
       return {
         deviceId: id,
         deviceKey: d?.deviceKey || null,
-        online: d ? !!d.online : false,
+        online: isOnline,
         lastHeartbeat: d ? d.lastHeartbeat : null,
         doorState: d ? d.doorState : "closed",
       };

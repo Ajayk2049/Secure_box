@@ -116,6 +116,7 @@ class WebSocketService {
     this.clients.forEach((client) => {
       if (client.ws.readyState === WebSocket.OPEN) {
         const matches =
+          client.role === "admin" ||
           validTargets.has(client.userId) ||
           Array.from(client.rooms).some((r) => validTargets.has(r));
         if (matches) {
