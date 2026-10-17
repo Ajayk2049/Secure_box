@@ -54,8 +54,8 @@ export async function sendOtp(request: FastifyRequest, reply: FastifyReply) {
   }
 
   const now = Date.now();
-  // 1. Cooldown check (60s for password recovery, 10s for register)
-  const cooldownDuration = type === "reset" ? 60 * 1000 : 10 * 1000;
+  // 1. Cooldown check (60s for both registration and reset per Rule 22.11)
+  const cooldownDuration = 60 * 1000;
   const lastRequestTime = allTimestamps.length > 0 ? Math.max(...allTimestamps.map((t) => new Date(t).getTime())) : 0;
   if (lastRequestTime && now - lastRequestTime < cooldownDuration) {
     const waitSeconds = Math.ceil((cooldownDuration - (now - lastRequestTime)) / 1000);
@@ -155,6 +155,26 @@ export async function checkPhone(request: FastifyRequest, reply: FastifyReply) {
     message: existingUser
       ? "An account with this mobile number already exists. Please sign in."
       : "Mobile number is available",
+  });
+}
+
+// 2b. Check If Email Exists
+export async function checkEmail(request: FastifyRequest, reply: FastifyReply) {
+  const { email } = (request.body as { email?: string }) || {};
+
+  if (!email) {
+    return reply.status(400).send({ error: "Email address is required" });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const existingUser = await User.findOne({ email: cleanEmail });
+
+  return reply.send({
+    exists: Boolean(existingUser),
+    email: cleanEmail,
+    message: existingUser
+      ? "An account with this email address already exists. Please sign in."
+      : "Email address is available",
   });
 }
 

@@ -111,11 +111,32 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
-  // 2. Register Account with OTP (+ optional Join Code)
+  // 1b. Check If Email Exists
+  Future<Map<String, dynamic>> checkEmail(String email) async {
+    try {
+      return await _api.checkEmail(email);
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      return {'exists': false, 'error': err};
+    }
+  }
+
+  // 1c. Check If Phone Exists
+  Future<Map<String, dynamic>> checkPhone(String phone) async {
+    try {
+      return await _api.checkPhone(phone);
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      return {'exists': false, 'error': err};
+    }
+  }
+
+  // 2. Register Account with OTP (+ optional Join Code & Email)
   Future<bool> registerWithOtp({
     required String phone,
     required String otp,
     required String password,
+    String? email,
     String? name,
     String? inviteCode,
   }) async {
@@ -128,6 +149,7 @@ class AuthViewModel extends ChangeNotifier {
         phone: phone,
         otp: otp,
         password: password,
+        email: email,
         name: name,
         inviteCode: inviteCode,
       );

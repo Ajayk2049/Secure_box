@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { 
   sendOtp, 
   checkPhone, 
+  checkEmail,
   registerWithOtp, 
   login, 
   getMe, 
@@ -15,6 +16,7 @@ import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { validateBody } from "../middlewares/validate.middleware.js";
 import {
   checkPhoneSchema,
+  checkEmailSchema,
   sendOtpSchema,
   registerWithOtpSchema,
   loginSchema,
@@ -34,7 +36,14 @@ export default async function authRoutes(fastify: FastifyInstance) {
     handler: checkPhone,
   });
 
-  // 1b. Smart Pre-Check & Send OTP (Rate limited: Max 5 / minute)
+  // 1b. Check Email Address (Max 10 / minute in prod)
+  fastify.post("/check-email", {
+    ...(isProd ? { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } } : {}),
+    preHandler: [validateBody(checkEmailSchema)],
+    handler: checkEmail,
+  });
+
+  // 1c. Smart Pre-Check & Send OTP (Rate limited: Max 5 / minute)
   fastify.post("/send-otp", {
     config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
     preHandler: [validateBody(sendOtpSchema)],

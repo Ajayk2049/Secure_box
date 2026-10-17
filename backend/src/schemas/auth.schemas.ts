@@ -9,6 +9,10 @@ export const checkPhoneSchema = z.object({
   phone: z.string().min(1, "Mobile number is required"),
 });
 
+export const checkEmailSchema = z.object({
+  email: z.string().email("Invalid email format"),
+});
+
 export const registerWithOtpSchema = z.object({
   phone: z.string().min(1, "Mobile number is required"),
   otp: z.string().min(4, "OTP must be at least 4 digits"),

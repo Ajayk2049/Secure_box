@@ -122,11 +122,42 @@ class ApiService {
     }
   }
 
-  // 2. Register with OTP (+ optional Join Code)
+  // 1b. Check If Email Exists
+  Future<Map<String, dynamic>> checkEmail(String email) async {
+    try {
+      final response = await _client.post('/api/auth/check-email', data: {
+        'email': email,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to check email'));
+    }
+  }
+
+  // 1c. Check If Phone Exists
+  Future<Map<String, dynamic>> checkPhone(String phone) async {
+    try {
+      final response = await _client.post('/api/auth/check-phone', data: {
+        'phone': phone,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to check phone'));
+    }
+  }
+
+  // 2. Register with OTP (+ optional Join Code & Email)
   Future<Map<String, dynamic>> registerWithOtp({
     required String phone,
     required String otp,
     required String password,
+    String? email,
     String? name,
     String? inviteCode,
   }) async {
@@ -135,6 +166,7 @@ class ApiService {
         'phone': phone,
         'otp': otp,
         'password': password,
+        if (email != null && email.isNotEmpty) 'email': email,
         if (name != null && name.isNotEmpty) 'name': name,
         if (inviteCode != null && inviteCode.isNotEmpty) 'inviteCode': inviteCode,
       });
