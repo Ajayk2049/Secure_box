@@ -200,6 +200,10 @@ export function Profile({ mode }: ProfileProps = {}) {
       setErrorMessage("Passwords do not match");
       return;
     }
+    if (regEmail && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(regEmail.trim())) {
+      setErrorMessage("Please enter a valid email address (e.g. name@example.com)");
+      return;
+    }
 
     setLoading(true);
     try {

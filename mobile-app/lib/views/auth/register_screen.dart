@@ -169,6 +169,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _handleRegister(AuthViewModel auth) async {
     final email = _emailController.text.trim().toLowerCase();
     if (email.isNotEmpty) {
+      final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+      if (!emailRegex.hasMatch(email)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a valid email address (e.g. name@example.com)'),
+            backgroundColor: ParcelGlassColors.alertRose,
+          ),
+        );
+        return;
+      }
+
       final emailCheck = await auth.checkEmail(email);
       if (!mounted) return;
       if (emailCheck['exists'] == true) {

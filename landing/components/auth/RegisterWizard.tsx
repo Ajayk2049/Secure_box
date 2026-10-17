@@ -65,11 +65,32 @@ export function RegisterWizard({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [emailExists, setEmailExists] = useState(false);
+  const [emailFormatError, setEmailFormatError] = useState<string | null>(null);
   const [phoneExists, setPhoneExists] = useState(false);
+
+  const validateEmailFormat = (val: string): boolean => {
+    const clean = val.trim();
+    if (!clean) {
+      setEmailFormatError(null);
+      return true;
+    }
+    const isValid = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(clean);
+    if (!isValid) {
+      setEmailFormatError("Please enter a valid email address (e.g. name@example.com)");
+      return false;
+    }
+    setEmailFormatError(null);
+    return true;
+  };
 
   const checkEmailAvailability = async (emailVal: string): Promise<boolean> => {
     const clean = emailVal.trim().toLowerCase();
-    if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+    if (!clean) {
+      setEmailExists(false);
+      setEmailFormatError(null);
+      return false;
+    }
+    if (!validateEmailFormat(clean)) {
       setEmailExists(false);
       return false;
     }
@@ -170,18 +191,45 @@ export function RegisterWizard({
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   disabled={loading}
                   value={email}
                   onChange={(e) => {
-                    onEmailChange(e.target.value);
+                    const val = e.target.value;
+                    onEmailChange(val);
                     if (emailExists) setEmailExists(false);
+                    if (emailFormatError) {
+                      if (!val.trim() || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(val.trim())) {
+                        setEmailFormatError(null);
+                      }
+                    }
                   }}
-                  onBlur={() => checkEmailAvailability(email)}
+                  onBlur={() => {
+                    if (email.trim()) {
+                      if (validateEmailFormat(email)) {
+                        checkEmailAvailability(email);
+                      }
+                    } else {
+                      setEmailFormatError(null);
+                      setEmailExists(false);
+                    }
+                  }}
                   placeholder="name@example.com"
-                  className="w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono"
+                  className={`w-full bg-white border-2 ${
+                    emailFormatError ? "border-rose-500" : "border-[#3D2310]/30"
+                  } pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono`}
                 />
               </div>
+              {emailFormatError && (
+                <div className="bg-rose-50 border border-rose-300 p-2 text-left space-y-1 mt-1.5">
+                  <p className="text-[11px] text-rose-800 font-sans font-medium leading-tight">
+                    {emailFormatError}
+                  </p>
+                </div>
+              )}
               {emailExists && (
                 <div className="bg-amber-50 border border-amber-300 p-2 text-left space-y-1 mt-1.5">
                   <p className="text-[11px] text-amber-900 font-sans font-medium leading-tight">
@@ -389,11 +437,14 @@ export function RegisterWizard({
               type="button"
               disabled={
                 loading ||
-                (step === 1 && (!name.trim() || emailExists)) ||
+                (step === 1 && (!name.trim() || emailExists || Boolean(emailFormatError) || (email.trim().length > 0 && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email.trim())))) ||
                 (step === 2 && (!phone || phone.length !== 10 || !otp || phoneExists))
               }
               onClick={() => {
-                if (step === 1 && (!name.trim() || emailExists)) return;
+                if (step === 1) {
+                  if (!name.trim() || emailExists) return;
+                  if (email.trim().length > 0 && !validateEmailFormat(email)) return;
+                }
                 if (step === 2 && (!phone || phone.length !== 10 || !otp || phoneExists)) return;
                 onSetStep(step + 1);
               }}
