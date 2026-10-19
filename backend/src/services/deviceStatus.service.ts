@@ -137,6 +137,7 @@ export class DeviceStatusService {
         commandId: enqueued.commandId,
         source: isDirectlyPushed ? "websocket_instant" : "command_queue",
         unlockedBy: userName,
+        userName,
         userRole,
         userId,
         deviceId: cleanDeviceId,

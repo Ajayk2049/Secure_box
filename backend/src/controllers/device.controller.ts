@@ -128,7 +128,7 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
 
   const logs = await Log.find({
     $or: [{ deviceId: device._id }, { "metadata.deviceId": device.deviceId }],
-    action: { $ne: "door_open" },
+    action: { $nin: ["door_open", "door_opened"] },
   })
     .sort({ timestamp: -1 })
     .limit(100);

@@ -18,11 +18,14 @@ class ParcelHistoryTile extends StatelessWidget {
     final actionLower = log.action.toLowerCase();
     final isEmergencyUnlock = actionLower.contains('emergency') || actionLower.contains('manual');
     final isUnlock = actionLower.contains('unlock') && !isEmergencyUnlock;
-    final isLock = actionLower.contains('lock') && !isUnlock && !isEmergencyUnlock;
-    final isDoorOpen = actionLower == 'door_open';
-    final isDelivery = actionLower.contains('delivery');
+    final isLock = (actionLower.contains('door_closed') || actionLower.contains('lock') || actionLower == 'closed') &&
+        !isUnlock &&
+        !isEmergencyUnlock;
+    final isOffline = actionLower.contains('offline');
+    final isOnline = actionLower.contains('online');
     final isCoOwnerAdded = actionLower.contains('co_owner_added');
     final isCoOwnerRemoved = actionLower.contains('co_owner_removed');
+    final isDelivery = actionLower.contains('delivery');
 
     final IconData icon = isEmergencyUnlock
         ? Icons.vpn_key_rounded
@@ -30,53 +33,76 @@ class ParcelHistoryTile extends StatelessWidget {
             ? Icons.lock_open_rounded
             : (isLock
                 ? Icons.lock_rounded
-                : (isDelivery
-                    ? Icons.inventory_2_outlined
-                    : (isCoOwnerAdded
-                        ? Icons.person_add_rounded
-                        : (isCoOwnerRemoved
-                            ? Icons.person_remove_rounded
-                            : (isDoorOpen ? Icons.sensor_door_outlined : Icons.history_rounded))))));
+                : (isOffline
+                    ? Icons.wifi_off_rounded
+                    : (isOnline
+                        ? Icons.wifi_rounded
+                        : (isDelivery
+                            ? Icons.inventory_2_outlined
+                            : (isCoOwnerAdded
+                                ? Icons.person_add_rounded
+                                : (isCoOwnerRemoved
+                                    ? Icons.person_remove_rounded
+                                    : Icons.history_rounded)))))));
 
     final Color iconColor = isEmergencyUnlock
-        ? const Color(0xFFD97706) // Warm amber warning
+        ? ParcelGlassColors.amberSignal
         : (isUnlock
-            ? ParcelGlassColors.mintSignal
+            ? ParcelGlassColors.alertRed
             : (isLock
-                ? ParcelGlassColors.accentBlue
-                : (isDelivery
-                    ? const Color(0xFF6366F1)
-                    : (isCoOwnerAdded
+                ? ParcelGlassColors.mintSignal
+                : (isOffline
+                    ? ParcelGlassColors.amberSignal
+                    : (isOnline
                         ? ParcelGlassColors.accentBlue
-                        : (isCoOwnerRemoved
-                            ? Colors.redAccent
-                            : (isDoorOpen ? ParcelGlassColors.amberSignal : ParcelGlassColors.slateSubtitle))))));
+                        : (isDelivery
+                            ? const Color(0xFF6366F1)
+                            : (isCoOwnerAdded
+                                ? ParcelGlassColors.accentBlue
+                                : (isCoOwnerRemoved
+                                    ? ParcelGlassColors.alertRed
+                                    : ParcelGlassColors.slateSubtitle)))))));
 
     String title;
     if (isEmergencyUnlock) {
-      title = 'Manual / Emergency Unlock';
+      title = 'Emergency Unlock';
     } else if (isUnlock) {
       title = 'Locker Unlocked';
     } else if (isLock) {
-      title = 'Locker Locked & Secured';
-    } else if (isDoorOpen) {
-      title = 'Door Sensor Opened';
+      title = 'Locker Locked';
+    } else if (isOffline) {
+      title = 'Device Offline';
+    } else if (isOnline) {
+      title = 'Device Online';
     } else if (isDelivery) {
-      title = 'Package Delivered & Locked';
+      title = 'Package Delivered';
     } else if (isCoOwnerAdded) {
       title = 'Co-Owner Added';
     } else if (isCoOwnerRemoved) {
       title = 'Co-Owner Removed';
     } else {
-      title = log.action.replaceAll('_', ' ').toUpperCase();
+      title = _toTitleCase(log.action.replaceAll('_', ' '));
     }
 
     final metadata = log.metadata ?? {};
-    final String? actorName = metadata['userName']?.toString();
+    final String? rawActor = (metadata['unlockedBy'] ??
+            metadata['userName'] ??
+            metadata['user'] ??
+            metadata['name'])
+        ?.toString();
+    final String? actorName = (rawActor != null &&
+            rawActor.trim().isNotEmpty &&
+            !rawActor.toLowerCase().contains('sensor') &&
+            !rawActor.toLowerCase().contains('latch'))
+        ? rawActor.trim()
+        : null;
 
-    final timeClock =
-        '${log.timestamp.hour.toString().padLeft(2, '0')}:${log.timestamp.minute.toString().padLeft(2, '0')}';
-    final timeStr = _formatTimestamp(log.timestamp);
+    final localTime = log.timestamp.toLocal();
+    final rawHour = localTime.hour;
+    final period = rawHour >= 12 ? 'PM' : 'AM';
+    final hour12 = rawHour % 12 == 0 ? 12 : rawHour % 12;
+    final minute = localTime.minute.toString().padLeft(2, '0');
+    final timeClock = '${hour12.toString().padLeft(2, '0')}:$minute $period';
 
     return RepaintBoundary(
       child: Container(
@@ -98,7 +124,7 @@ class ParcelHistoryTile extends StatelessWidget {
           ],
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
               padding: const EdgeInsets.all(8),
@@ -116,6 +142,7 @@ class ParcelHistoryTile extends StatelessWidget {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     title,
@@ -125,10 +152,12 @@ class ParcelHistoryTile extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(height: 3),
                   if (actorName != null && actorName.isNotEmpty) ...[
+                    const SizedBox(height: 3),
                     Text(
-                      'by $actorName',
+                      actorName.startsWith(RegExp(r'by\s+', caseSensitive: false))
+                          ? actorName
+                          : 'by $actorName',
                       style: TextStyle(
                         color: secondaryTextColor,
                         fontSize: 12.5,
@@ -137,16 +166,7 @@ class ParcelHistoryTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 3),
                   ],
-                  Text(
-                    '$timeStr at $timeClock',
-                    style: TextStyle(
-                      color: secondaryTextColor.withValues(alpha: 0.75),
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -175,15 +195,11 @@ class ParcelHistoryTile extends StatelessWidget {
     );
   }
 
-  String _formatTimestamp(DateTime dt) {
-    final now = DateTime.now();
-    final isToday = dt.year == now.year && dt.month == now.month && dt.day == now.day;
-    if (isToday) return 'Today';
-    final yesterday = now.subtract(const Duration(days: 1));
-    final isYesterday = dt.year == yesterday.year && dt.month == yesterday.month && dt.day == yesterday.day;
-    if (isYesterday) return 'Yesterday';
-
-    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
+  static String _toTitleCase(String text) {
+    if (text.isEmpty) return text;
+    return text.split(' ').map((word) {
+      if (word.isEmpty) return word;
+      return word[0].toUpperCase() + word.substring(1).toLowerCase();
+    }).join(' ');
   }
 }

@@ -18,7 +18,7 @@ class LogModel {
       id: json['_id'] ?? '',
       deviceId: json['deviceId'] ?? '',
       action: json['action'] ?? '',
-      timestamp: DateTime.parse(json['timestamp'] ?? DateTime.now().toIso8601String()),
+      timestamp: DateTime.parse(json['timestamp'] ?? DateTime.now().toIso8601String()).toLocal(),
       metadata: json['metadata'],
     );
   }
