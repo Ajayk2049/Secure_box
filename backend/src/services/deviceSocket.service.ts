@@ -128,27 +128,38 @@ class DeviceSocketService {
     console.log(`[DEVICE-WS] Hardware disconnected: ${cleanId}`);
 
     try {
-      const device = await Device.findOne({ deviceId: cleanId });
-      if (device) {
-        const disconnectTime = new Date();
-        device.online = false;
-        device.lastDisconnectedAt = disconnectTime;
-        await device.save();
+      const disconnectTime = new Date();
+      // Atomic state transition: ONLY update and log if device was currently online (true -> false)
+      const device = await Device.findOneAndUpdate(
+        { deviceId: cleanId, online: true },
+        { $set: { online: false, lastDisconnectedAt: disconnectTime } },
+        { new: false }
+      );
 
-        await Log.create({
-          deviceId: device._id,
-          action: "device_offline",
-          timestamp: disconnectTime,
-          metadata: { source: "esp32_websocket_disconnect", deviceId: cleanId },
-        }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_offline for ${cleanId}:`, err));
-
-        const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
-        wsService.broadcastToDeviceGroup(targets, {
-          type: "DEVICE_OFFLINE",
-          deviceId: cleanId,
-          timestamp: disconnectTime.toISOString(),
-        });
+      // If device was already offline, avoid duplicate audit log and broadcast!
+      if (!device) {
+        return;
       }
+
+      await Log.create({
+        deviceId: device._id,
+        action: "device_offline",
+        timestamp: disconnectTime,
+        metadata: { source: "esp32_websocket_disconnect", deviceId: cleanId },
+      }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_offline for ${cleanId}:`, err));
+
+      const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
+      wsService.broadcastToDeviceGroup(targets, {
+        type: "DEVICE_OFFLINE",
+        deviceId: cleanId,
+        timestamp: disconnectTime.toISOString(),
+      });
+      wsService.broadcastToDeviceGroup(targets, {
+        type: "DEVICE_STATUS",
+        deviceId: cleanId,
+        online: false,
+        doorState: device.doorState,
+      });
     } catch (err) {
       console.error(`[DEVICE-WS] Error handling disconnect for ${cleanId}:`, err);
     }

@@ -193,7 +193,17 @@ class _HomeScreenState extends State<HomeScreen> {
               child: HomeBottomNav(
                 selectedIndex: _currentTab,
                 onChanged: (index) {
-                  if (_currentTab == index) return;
+                  if (_currentTab == index) {
+                    if (index == 1) {
+                      final homeVM = context.read<HomeViewModel>();
+                      final devId = homeVM.selectedDevice?.deviceId ??
+                          (homeVM.devices.isNotEmpty ? homeVM.devices.first.deviceId : null);
+                      if (devId != null) {
+                        homeVM.fetchDeviceLogs(devId);
+                      }
+                    }
+                    return;
+                  }
                   setState(() => _currentTab = index);
                   if (index == 1) {
                     final homeVM = context.read<HomeViewModel>();

@@ -176,6 +176,9 @@ class HomeViewModel extends ChangeNotifier {
     } else {
       _fetchDevicesSilent();
     }
+
+    // Live update history logs in real time whenever any device state change occurs!
+    fetchDeviceLogs(targetUpper);
   }
 
   Future<void> _fetchDevicesSilent() async {

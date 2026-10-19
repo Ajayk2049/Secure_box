@@ -11,14 +11,34 @@ class HomeHistoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final home = context.watch<HomeViewModel>();
-    final validLogs = home.logs.where((l) {
+    final validLogs = <LogModel>[];
+    for (final l in home.logs) {
       final a = l.action.toLowerCase().replaceAll(' ', '_');
-      return a != 'door_open' && a != 'door_opened';
-    }).toList();
+      if (a == 'door_open' || a == 'door_opened') continue;
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 110),
+      // Deduplicate rapid consecutive duplicate offline or online logs
+      if (validLogs.isNotEmpty &&
+          validLogs.last.action.toLowerCase() == l.action.toLowerCase() &&
+          (a == 'device_offline' || a == 'device_online') &&
+          validLogs.last.timestamp.difference(l.timestamp).abs().inSeconds <= 10) {
+        continue;
+      }
+      validLogs.add(l);
+    }
+
+    return RefreshIndicator(
+      color: ParcelGlassColors.accentBlue,
+      backgroundColor: Colors.white,
+      onRefresh: () async {
+        final devId = home.selectedDevice?.deviceId ??
+            (home.devices.isNotEmpty ? home.devices.first.deviceId : null);
+        if (devId != null) {
+          await home.fetchDeviceLogs(devId);
+        }
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 110),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 700),
@@ -98,8 +118,9 @@ class HomeHistoryTab extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   List<Widget> _buildGroupedLogs(List<LogModel> logs) {
     final Map<String, List<LogModel>> grouped = {};
