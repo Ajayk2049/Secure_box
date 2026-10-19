@@ -90,10 +90,16 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
         }
       });
 
-      // 3. Native WebSocket ping listener (RFC 6455 protocol ping from webSocket.enableHeartbeat)
+      // 3. Native WebSocket ping & pong protocol frame listeners (RFC 6455)
       socket.on("ping", () => {
         if (authenticated && deviceId) {
-          deviceSocketService.handleHeartbeat(deviceId).catch(() => {});
+          deviceSocketService.recordPong(deviceId);
+        }
+      });
+
+      socket.on("pong", () => {
+        if (authenticated && deviceId) {
+          deviceSocketService.recordPong(deviceId);
         }
       });
 

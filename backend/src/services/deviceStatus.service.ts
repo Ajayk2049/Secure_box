@@ -27,7 +27,7 @@ export class DeviceStatusService {
     // 2. Fallback to fresh heartbeat threshold (45 seconds)
     if (dbOnline && lastHeartbeat) {
       const hbTime = new Date(lastHeartbeat).getTime();
-      return Date.now() - hbTime < 45000;
+      return Date.now() - hbTime < 25000;
     }
 
     return false;

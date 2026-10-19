@@ -9,7 +9,7 @@ interface ConnectedDevice {
   deviceId: string;
   connectedAt: Date;
   lastHeartbeat: Date;
-  isAlive: boolean;
+  missedPings: number;
 }
 
 class DeviceSocketService {
@@ -76,7 +76,7 @@ class DeviceSocketService {
       deviceId: cleanId,
       connectedAt: now,
       lastHeartbeat: now,
-      isAlive: true,
+      missedPings: 0,
     });
 
     console.log(`[DEVICE-WS] Hardware connected: ${cleanId}`);
@@ -155,7 +155,20 @@ class DeviceSocketService {
   }
 
   /**
+   * Records proof-of-life on incoming native WebSocket pong or ping frame.
+   */
+  recordPong(deviceId: string): void {
+    const cleanId = deviceId.trim().toUpperCase();
+    const conn = this.devices.get(cleanId);
+    if (conn) {
+      conn.lastHeartbeat = new Date();
+      conn.missedPings = 0;
+    }
+  }
+
+  /**
    * Handles incoming heartbeat from ESP32.
+   * Updates state purely in RAM to protect MongoDB from high-frequency disk I/O.
    */
   async handleHeartbeat(
     deviceId: string,
@@ -166,16 +179,47 @@ class DeviceSocketService {
     const now = new Date();
     if (conn) {
       conn.lastHeartbeat = now;
-      conn.isAlive = true;
+      conn.missedPings = 0;
     }
-
-    await Device.updateOne(
-      { deviceId: cleanId },
-      { $set: { online: true, lastHeartbeat: now } }
-    ).catch(() => { });
 
     if (conn && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify({ type: "HEARTBEAT_ACK", timestamp: now.getTime() }));
+    }
+  }
+
+  /**
+   * High-speed dead-socket sweeper: runs periodically (e.g. every 3s-5s).
+   * Actively sends RFC 6455 Ping frames and terminates unresponsive ghost sockets within 6-8s.
+   */
+  sweepConnections(): void {
+    const now = Date.now();
+    for (const [cleanId, conn] of this.devices.entries()) {
+      const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
+
+      // If device missed 2 consecutive pings (approx 6-8s) or complete silence > 20s
+      if (conn.missedPings >= 2 || timeSinceHeartbeat > 20000) {
+        console.log(
+          `[DEVICE-WS] Device ${cleanId} unresponsive for ${Math.round(timeSinceHeartbeat / 1000)}s (missed ${conn.missedPings} pings). Terminating ghost socket.`
+        );
+        try {
+          conn.ws.terminate();
+        } catch { }
+        this.handleDisconnect(cleanId, conn.ws);
+        continue;
+      }
+
+      // If socket is open, send native protocol ping and increment missed counter
+      if (conn.ws.readyState === WebSocket.OPEN) {
+        conn.missedPings++;
+        try {
+          conn.ws.ping();
+        } catch {
+          try { conn.ws.terminate(); } catch { }
+          this.handleDisconnect(cleanId, conn.ws);
+        }
+      } else if (conn.ws.readyState !== WebSocket.CONNECTING) {
+        this.handleDisconnect(cleanId, conn.ws);
+      }
     }
   }
 
@@ -231,10 +275,17 @@ class DeviceSocketService {
     return true;
   }
 
+  /**
+   * Verifies if device has an active hardware WebSocket connection that communicated recently.
+   */
   isDeviceConnected(deviceId: string): boolean {
     const cleanId = deviceId.trim().toUpperCase();
     const conn = this.devices.get(cleanId);
-    return Boolean(conn && conn.ws.readyState === WebSocket.OPEN);
+    if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    // Verified alive in memory within the last 15 seconds
+    return Date.now() - conn.lastHeartbeat.getTime() < 15000;
   }
 
   getConnectedCount(): number {

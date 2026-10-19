@@ -9,7 +9,11 @@ import { deviceSocketService } from "./deviceSocket.service.js";
  */
 export async function checkDeviceWatchdog(): Promise<void> {
   try {
-    const threshold = new Date(Date.now() - 45 * 1000);
+    // 1. High-frequency in-memory ping sweep: reaps ghost sockets and terminates dead connections
+    deviceSocketService.sweepConnections();
+
+    // 2. Database safety sweep: catches any offline devices not covered by active sockets
+    const threshold = new Date(Date.now() - 30 * 1000);
     const staleDevices = await Device.find({
       online: true,
       $or: [{ lastHeartbeat: { $lt: threshold } }, { lastHeartbeat: null }],
@@ -20,13 +24,8 @@ export async function checkDeviceWatchdog(): Promise<void> {
     const actuallyStale = [];
 
     for (const dev of staleDevices) {
-      // If the hardware WebSocket is currently active and open, protect it
-      if (deviceSocketService.isDeviceConnected(dev.deviceId)) {
-        await Device.updateOne(
-          { _id: dev._id },
-          { $set: { lastHeartbeat: new Date(), online: true } }
-        ).catch(() => {});
-      } else {
+      // Only protect if connection is genuinely fresh in RAM
+      if (!deviceSocketService.isDeviceConnected(dev.deviceId)) {
         actuallyStale.push(dev);
       }
     }
