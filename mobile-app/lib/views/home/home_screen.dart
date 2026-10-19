@@ -4,6 +4,7 @@ import '../../models/device.model.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import '../settings/settings_screen.dart';
+import '../settings/widgets/edit_profile_modal.dart';
 import '../widgets/add_locker_dialog.dart';
 import '../widgets/connection_warning_card.dart';
 import '../widgets/glass_theme.dart';
@@ -55,6 +56,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showInviteSheet(BuildContext context, String deviceId, String deviceName) {
     CoOwnerInviteSheet.show(context, deviceId, deviceName);
+  }
+
+  void _showOfflineWarning(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('This action is unavailable while the server is offline.'),
+        backgroundColor: ParcelGlassColors.alertRed,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
   }
 
   Future<void> _handleUnlock(DeviceModel device) async {
@@ -230,9 +243,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         HomeUserGreeting(
                           userName: userName,
+                          avatarEmoji: authVM.avatarEmoji,
                           showAddButton: false,
                           isOffline: homeVM.isOffline,
                           onAddLocker: () => _showAddLocker(context),
+                          onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                         ),
                         if (homeVM.isOffline) ...[
                           const SizedBox(height: 16),
@@ -269,9 +284,11 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 HomeUserGreeting(
                   userName: userName,
+                  avatarEmoji: authVM.avatarEmoji,
                   showAddButton: true,
                   isOffline: homeVM.isOffline,
                   onAddLocker: () => _showAddLocker(context),
+                  onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                 ),
                 const SizedBox(height: 16),
                 if (homeVM.isOffline) ...[

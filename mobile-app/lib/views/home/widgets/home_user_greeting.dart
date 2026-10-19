@@ -3,41 +3,55 @@ import '../../widgets/glass_theme.dart';
 
 class HomeUserGreeting extends StatelessWidget {
   final String userName;
+  final String? avatarEmoji;
   final bool showAddButton;
   final bool isOffline;
   final VoidCallback onAddLocker;
+  final VoidCallback? onProfileTap;
 
   const HomeUserGreeting({
     super.key,
     required this.userName,
+    this.avatarEmoji,
     required this.showAddButton,
     this.isOffline = false,
     required this.onAddLocker,
+    this.onProfileTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasEmoji = avatarEmoji != null && avatarEmoji!.isNotEmpty;
+
     return Row(
       children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: ParcelGlassColors.accentBlue.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: ParcelGlassColors.accentBlue.withValues(alpha: 0.35),
-              width: 1.5,
-            ),
-          ),
-          child: Center(
-            child: Text(
-              userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
-              style: const TextStyle(
-                color: ParcelGlassColors.accentBlue,
-                fontWeight: FontWeight.w900,
-                fontSize: 18,
+        GestureDetector(
+          onTap: onProfileTap,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: ParcelGlassColors.accentBlue.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: ParcelGlassColors.accentBlue.withValues(alpha: 0.35),
+                width: 1.5,
               ),
+            ),
+            child: Center(
+              child: hasEmoji
+                  ? Text(
+                      avatarEmoji!,
+                      style: const TextStyle(fontSize: 22),
+                    )
+                  : Text(
+                      userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+                      style: const TextStyle(
+                        color: ParcelGlassColors.accentBlue,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                      ),
+                    ),
             ),
           ),
         ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../view_models/auth_view_model.dart';
 import '../../widgets/glass_theme.dart';
+import 'avatar_emoji_picker.dart';
 
 class EditProfileModal extends StatefulWidget {
   const EditProfileModal({super.key});
@@ -23,6 +24,7 @@ class _EditProfileModalState extends State<EditProfileModal> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
   late TextEditingController _emailController;
+  String? _selectedEmoji;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -32,6 +34,7 @@ class _EditProfileModalState extends State<EditProfileModal> {
     final auth = context.read<AuthViewModel>();
     _nameController = TextEditingController(text: auth.user?.name ?? '');
     _emailController = TextEditingController(text: auth.user?.email ?? '');
+    _selectedEmoji = auth.avatarEmoji;
   }
 
   @override
@@ -50,10 +53,22 @@ class _EditProfileModalState extends State<EditProfileModal> {
     });
 
     final auth = context.read<AuthViewModel>();
-    final success = await auth.updateProfile(
-      name: _nameController.text.trim(),
-      email: _emailController.text.trim(),
-    );
+    
+    // Save local avatar emoji immediately
+    await auth.setAvatarEmoji(_selectedEmoji);
+
+    final newName = _nameController.text.trim();
+    final newEmail = _emailController.text.trim();
+    final currentName = auth.user?.name ?? '';
+    final currentEmail = auth.user?.email ?? '';
+
+    bool success = true;
+    if (newName != currentName || newEmail != currentEmail) {
+      success = await auth.updateProfile(
+        name: newName,
+        email: newEmail,
+      );
+    }
 
     if (!mounted) return;
 
@@ -124,6 +139,20 @@ class _EditProfileModalState extends State<EditProfileModal> {
                 constraints: const BoxConstraints(),
               ),
             ],
+          ),
+          const SizedBox(height: 16),
+
+          // Avatar Emoji Picker
+          AvatarEmojiPicker(
+            selectedEmoji: _selectedEmoji,
+            defaultInitial: (auth.user?.name != null && auth.user!.name!.isNotEmpty)
+                ? auth.user!.name![0].toUpperCase()
+                : 'U',
+            onEmojiChanged: (emoji) {
+              setState(() {
+                _selectedEmoji = emoji;
+              });
+            },
           ),
           const SizedBox(height: 16),
 

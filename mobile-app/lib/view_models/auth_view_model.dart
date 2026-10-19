@@ -16,6 +16,7 @@ class AuthViewModel extends ChangeNotifier {
   bool _initialized = false;
   String? _error;
   String? _savedIdentifier;
+  String? _avatarEmoji;
   Timer? _errorDismissTimer;
 
   UserModel? get user => _user;
@@ -23,7 +24,14 @@ class AuthViewModel extends ChangeNotifier {
   bool get initialized => _initialized;
   String? get error => _error;
   String? get savedIdentifier => _savedIdentifier;
+  String? get avatarEmoji => _avatarEmoji;
   bool get isAuthenticated => _user != null;
+
+  Future<void> setAvatarEmoji(String? emoji) async {
+    _avatarEmoji = (emoji != null && emoji.trim().isNotEmpty) ? emoji.trim() : null;
+    await _storage.saveAvatarEmoji(_avatarEmoji);
+    notifyListeners();
+  }
 
   void setErrorWithAutoDismiss(String message, [Duration duration = const Duration(seconds: 3)]) {
     _error = message;
@@ -55,6 +63,7 @@ class AuthViewModel extends ChangeNotifier {
 
     try {
       _savedIdentifier = await _storage.getSavedIdentifier();
+      _avatarEmoji = await _storage.getAvatarEmoji();
 
       final hasToken = await _storage.hasToken();
       if (hasToken) {

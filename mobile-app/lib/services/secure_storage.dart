@@ -61,6 +61,16 @@ class SecureStorage {
   Future<String?> getUserData() async => _safeRead('user_profile');
   Future<void> deleteUserData() async => _safeDelete('user_profile');
 
+  // --- Local Profile Avatar Emoji (ShareIt style) ---
+  Future<void> saveAvatarEmoji(String? emoji) async {
+    if (emoji == null || emoji.trim().isEmpty) {
+      await _safeDelete('user_avatar_emoji');
+    } else {
+      await _safeWrite('user_avatar_emoji', emoji.trim());
+    }
+  }
+  Future<String?> getAvatarEmoji() async => _safeRead('user_avatar_emoji');
+
   // --- Cached Devices ---
   Future<void> saveCachedDevices(String devicesJson) async => _safeWrite('cached_devices', devicesJson);
   Future<String?> getCachedDevices() async => _safeRead('cached_devices');

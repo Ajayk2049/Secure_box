@@ -52,6 +52,8 @@ coverage/
 # Misc
 *.tsbuildinfo
 progress.md
+task.md
+walkthrough.md
 
 # Markdown Files (Except README.md and firmware.md)
 **/*.md

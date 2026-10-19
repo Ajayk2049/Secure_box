@@ -158,8 +158,9 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
     return reply.status(404).send({ error: "Device not found" });
   }
 
-  if (!isAuthorizedUser(device, user.id)) {
-    return reply.status(403).send({ error: "Not authorized to rename this device" });
+  const isOwner = device.ownerId?.toString() === user.id || (device.ownerId as any)?._id?.toString() === user.id;
+  if (!isOwner) {
+    return reply.status(403).send({ error: "Only the primary owner can rename this locker box" });
   }
 
   device.name = name.trim();
