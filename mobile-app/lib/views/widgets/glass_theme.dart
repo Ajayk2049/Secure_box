@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
@@ -164,55 +163,51 @@ Future<T?> showParcelGlassDialog<T>({
     context: context,
     barrierDismissible: barrierDismissible,
     barrierLabel: 'Dismiss',
-    barrierColor: Colors.black.withValues(alpha: 0.25),
-    transitionDuration: const Duration(milliseconds: 220),
+    barrierColor: Colors.black.withValues(alpha: 0.38),
+    transitionDuration: const Duration(milliseconds: 200),
     pageBuilder: (ctx, anim1, anim2) {
       return Center(
-        child: Material(
-          type: MaterialType.transparency,
-          child: Container(
-            width: width,
-            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(cornerRadius),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF3D2310).withValues(alpha: 0.22),
-                  blurRadius: 36,
-                  offset: const Offset(0, 16),
-                ),
-                BoxShadow(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(cornerRadius),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(cornerRadius),
-                    color: Colors.white.withValues(alpha: 0.40),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.70),
-                      width: 1.5,
-                    ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.55),
-                        Colors.white.withValues(alpha: 0.28),
-                      ],
-                    ),
+        child: RepaintBoundary(
+          child: Material(
+            type: MaterialType.transparency,
+            child: Container(
+              width: width,
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(cornerRadius),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF3D2310).withValues(alpha: 0.16),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
                   ),
-                  child: Padding(
-                    padding: padding,
-                    child: child,
+                  BoxShadow(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    blurRadius: 8,
+                    offset: const Offset(0, -1),
                   ),
+                ],
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(cornerRadius),
+                  color: Colors.white.withValues(alpha: 0.88),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    width: 1.5,
+                  ),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.94),
+                      Colors.white.withValues(alpha: 0.82),
+                    ],
+                  ),
+                ),
+                child: Padding(
+                  padding: padding,
+                  child: child,
                 ),
               ),
             ),
@@ -226,7 +221,7 @@ Future<T?> showParcelGlassDialog<T>({
       return FadeTransition(
         opacity: curved,
         child: ScaleTransition(
-          scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
+          scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
           child: dialogChild,
         ),
       );

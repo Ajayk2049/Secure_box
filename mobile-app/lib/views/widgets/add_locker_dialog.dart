@@ -163,7 +163,8 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
 
           // LiquidGlassTabBar for tabs (pure text: Device Code & Join Code)
           Center(
-            child: LiquidGlassTabBar(
+            child: RepaintBoundary(
+              child: LiquidGlassTabBar(
               width: 300,
               height: 44,
               margin: EdgeInsets.zero,
@@ -211,6 +212,7 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
               ),
             ),
           ),
+        ),
 
           const SizedBox(height: 18),
 
