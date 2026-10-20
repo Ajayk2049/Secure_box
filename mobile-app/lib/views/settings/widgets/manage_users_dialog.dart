@@ -15,8 +15,8 @@ class ManageUsersDialog extends StatelessWidget {
   static Future<void> show(BuildContext context) {
     return showParcelGlassDialog(
       context: context,
-      width: 360,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      width: 350,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
       child: const ManageUsersDialog(),
     );
   }
@@ -111,7 +111,7 @@ class _ManageUsersContent extends StatelessWidget {
         else ...[
           if (vm.isLoading)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 30),
+              padding: EdgeInsets.symmetric(vertical: 40),
               child: Center(
                 child: CircularProgressIndicator(strokeWidth: 2, color: ParcelGlassColors.accentBlue),
               ),

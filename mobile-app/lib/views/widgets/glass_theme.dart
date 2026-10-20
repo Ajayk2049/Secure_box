@@ -149,8 +149,8 @@ class LiquidParcelCard extends StatelessWidget {
   }
 }
 
-/// Ultra-smooth popup dialog with liquid glass aesthetics, zero shader recompilation jitter,
-/// and smooth scale + fade entrance.
+/// Ultra-smooth popup dialog with authentic liquid glass aesthetics from liquid_glass_easy,
+/// zero shader recompilation jitter, and smooth scale + fade entrance.
 Future<T?> showParcelGlassDialog<T>({
   required BuildContext context,
   required Widget child,
@@ -159,73 +159,72 @@ Future<T?> showParcelGlassDialog<T>({
   double cornerRadius = 28,
   bool barrierDismissible = true,
 }) {
-  return showGeneralDialog<T>(
+  return showLiquidGlassDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
-    barrierLabel: 'Dismiss',
     barrierColor: Colors.black.withValues(alpha: 0.38),
     transitionDuration: const Duration(milliseconds: 200),
-    pageBuilder: (ctx, anim1, anim2) {
-      return Center(
-        child: RepaintBoundary(
-          child: Material(
-            type: MaterialType.transparency,
-            child: Container(
-              width: width,
-              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(cornerRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF3D2310).withValues(alpha: 0.16),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
-                  ),
-                  BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.65),
-                    blurRadius: 8,
-                    offset: const Offset(0, -1),
-                  ),
-                ],
+    transitionCurve: Curves.easeOutCubic,
+    reverseTransitionCurve: Curves.easeInCubic,
+    builder: (ctx) => Builder(
+      builder: (dialogContext) {
+        final mediaQuery = MediaQuery.of(dialogContext);
+        final keyboardBottom = mediaQuery.viewInsets.bottom;
+        final viewPadding = mediaQuery.viewPadding;
+        final verticalPadding = padding is EdgeInsets ? padding.vertical : 40.0;
+        final availableContentHeight = (mediaQuery.size.height -
+                keyboardBottom -
+                viewPadding.top -
+                viewPadding.bottom -
+                verticalPadding -
+                24)
+            .clamp(140.0, double.infinity);
+
+        return AnimatedPadding(
+          padding: EdgeInsets.only(bottom: keyboardBottom),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: LiquidGlassDialog(
+            width: width,
+            padding: padding,
+            style: LiquidGlassStyle(
+              shape: LiquidGlassShape.continuousRoundedRectangle(
+                cornerRadius: cornerRadius,
+                borderWidth: 1.2,
+                borderColor: Colors.white.withValues(alpha: 0.70),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(cornerRadius),
-                  color: Colors.white.withValues(alpha: 0.88),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    width: 1.5,
-                  ),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withValues(alpha: 0.94),
-                      Colors.white.withValues(alpha: 0.82),
-                    ],
-                  ),
+              appearance: LiquidGlassAppearance(
+                color: Colors.white.withValues(alpha: 0.40),
+                blur: const LiquidGlassBlur(sigmaX: 10, sigmaY: 10),
+                shadow: const LiquidGlassShadow(
+                  blur: 24,
+                  opacity: 0.16,
+                  color: Color(0xFF3D2310),
+                  offset: Offset(0, 10),
                 ),
-                child: Padding(
-                  padding: padding,
+              ),
+              refraction: const LiquidGlassRefraction(
+                distortion: 0.10,
+                distortionWidth: 24,
+                chromaticAberration: 0.002,
+              ),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: availableContentHeight,
+                ),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
                   child: child,
                 ),
               ),
             ),
           ),
-        ),
-      );
-    },
-
-    transitionBuilder: (ctx, anim, secondaryAnim, dialogChild) {
-      final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
-      return FadeTransition(
-        opacity: curved,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
-          child: dialogChild,
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }
 
