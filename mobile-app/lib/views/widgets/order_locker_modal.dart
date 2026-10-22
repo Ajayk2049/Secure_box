@@ -22,7 +22,9 @@ class OrderLockerModal extends StatefulWidget {
 }
 
 class _OrderLockerModalState extends State<OrderLockerModal> {
+  final _houseNoController = TextEditingController();
   final _addressController = TextEditingController();
+  final _landmarkController = TextEditingController();
   final _pincodeController = TextEditingController();
   int _units = 1;
   bool _isSubmitting = false;
@@ -49,7 +51,9 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
   @override
   void dispose() {
     _addressController.removeListener(_onAddressChanged);
+    _houseNoController.dispose();
     _addressController.dispose();
+    _landmarkController.dispose();
     _pincodeController.dispose();
     super.dispose();
   }
@@ -97,7 +101,7 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Location detected from GPS! Feel free to edit or add details.',
+                'Street & Area detected from GPS! Please enter your house/flat number.',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -106,21 +110,33 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
         backgroundColor: ParcelGlassColors.mintSignal,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
   Future<void> _handleSubmit() async {
+    final houseNo = _houseNoController.text.trim();
     final address = _addressController.text.trim();
+    final landmark = _landmarkController.text.trim();
     final pincode = _pincodeController.text.trim();
 
-    if (address.isEmpty) {
-      setState(() => _errorMessage = 'Please enter your delivery address');
+    if (houseNo.isEmpty) {
+      setState(() => _errorMessage = 'Please enter your house or flat number');
       return;
     }
 
-    if (pincode.isNotEmpty && pincode.length != 6) {
+    if (address.isEmpty) {
+      setState(() => _errorMessage = 'Please enter your street or area address');
+      return;
+    }
+
+    if (pincode.isEmpty) {
+      setState(() => _errorMessage = 'Please enter your 6-digit PIN code');
+      return;
+    }
+
+    if (pincode.length != 6) {
       setState(() => _errorMessage = 'Please enter a valid 6-digit PIN code');
       return;
     }
@@ -130,9 +146,16 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
       _errorMessage = null;
     });
 
+    // Build the complete doorstep delivery address
+    final fullAddress = [
+      houseNo,
+      address,
+      if (landmark.isNotEmpty) 'Landmark: $landmark',
+    ].join(', ');
+
     final auth = context.read<AuthViewModel>();
     final success = await auth.placeLockerOrder(
-      address: address,
+      address: fullAddress,
       pincode: pincode.isNotEmpty ? pincode : null,
       units: _units,
     );
@@ -244,11 +267,11 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
           ),
         ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
 
-        // Address Field Header
+        // 1. House / Flat No (Mandatory)
         const Text(
-          'DELIVERY ADDRESS',
+          'HOUSE / FLAT NO',
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w800,
@@ -256,7 +279,41 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
             color: ParcelGlassColors.slateSubtitle,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 5),
+        TextField(
+          controller: _houseNoController,
+          maxLines: 1,
+          style: const TextStyle(fontSize: 13, color: ParcelGlassColors.navyTitle, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
+            hintText: 'Flat / Villa / House No, Apartment Name',
+            hintStyle: TextStyle(fontSize: 12, color: Colors.black.withValues(alpha: 0.35)),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.45),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.65), width: 1.2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: ParcelGlassColors.parcelBrown, width: 1.4),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        // 2. Street & Area Address (Mandatory, with embedded GPS)
+        const Text(
+          'STREET & AREA ADDRESS',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+            color: ParcelGlassColors.slateSubtitle,
+          ),
+        ),
+        const SizedBox(height: 5),
         Stack(
           alignment: Alignment.topRight,
           children: [
@@ -265,7 +322,7 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
               maxLines: 2,
               style: const TextStyle(fontSize: 13, color: ParcelGlassColors.navyTitle, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
-                hintText: 'Flat / Villa No, Apartment, Street Name, Area',
+                hintText: 'Street name, main, cross, locality / area',
                 hintStyle: TextStyle(fontSize: 12, color: Colors.black.withValues(alpha: 0.35)),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.45),
@@ -315,6 +372,40 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
                 ),
               ),
           ],
+        ),
+
+        const SizedBox(height: 10),
+
+        // 3. Landmark (Optional)
+        const Text(
+          'LANDMARK (OPTIONAL)',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+            color: ParcelGlassColors.slateSubtitle,
+          ),
+        ),
+        const SizedBox(height: 5),
+        TextField(
+          controller: _landmarkController,
+          maxLines: 1,
+          style: const TextStyle(fontSize: 13, color: ParcelGlassColors.navyTitle, fontWeight: FontWeight.w600),
+          decoration: InputDecoration(
+            hintText: 'e.g. Near Metro Station, Behind Park',
+            hintStyle: TextStyle(fontSize: 12, color: Colors.black.withValues(alpha: 0.35)),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.45),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.65), width: 1.2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: ParcelGlassColors.parcelBrown, width: 1.4),
+            ),
+          ),
         ),
 
         const SizedBox(height: 12),
@@ -414,11 +505,11 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: ParcelGlassColors.navyTitle),
                         ),
                         InkWell(
-                          onTap: _units < 5 ? () => setState(() => _units++) : null,
+                          onTap: _units < 10 ? () => setState(() => _units++) : null,
                           borderRadius: BorderRadius.circular(8),
                           child: Padding(
                             padding: const EdgeInsets.all(4),
-                            child: Icon(Icons.add, size: 16, color: _units < 5 ? ParcelGlassColors.navyTitle : Colors.grey),
+                            child: Icon(Icons.add, size: 16, color: _units < 10 ? ParcelGlassColors.navyTitle : Colors.grey),
                           ),
                         ),
                       ],
