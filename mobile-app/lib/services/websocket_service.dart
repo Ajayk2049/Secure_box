@@ -59,9 +59,19 @@ class WebSocketService {
               if (message['type'] == 'PONG') return;
               if (message['type'] == 'ERROR') {
                 final err = message['error']?.toString().toLowerCase() ?? '';
-                if (err.contains('expired') || err.contains('unauthorized')) {
+                // Only authentication/token errors should trigger session expiration
+                if (err.contains('token expired') || err.contains('invalid token') || err.contains('token required')) {
                   ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-                  disconnect();
+                  disconnect(clearRooms: true);
+                  return;
+                }
+                // Device-level room authorization errors should not expire the user session
+                if (err.contains('unauthorized to monitor device') || err.contains('not found')) {
+                  for (final room in _joinedRooms.toList()) {
+                    if (err.contains(room.toLowerCase())) {
+                      _joinedRooms.remove(room);
+                    }
+                  }
                   return;
                 }
               }
@@ -76,10 +86,10 @@ class WebSocketService {
         onDone: () {
           final code = _channel?.closeCode;
           final reason = _channel?.closeReason;
-          if (code == 4401 || (reason != null && reason.toLowerCase().contains('expired'))) {
+          if (code == 4401 || (reason != null && (reason.toLowerCase().contains('expired') || reason.toLowerCase().contains('token')))) {
             debugPrint('WebSocket closed due to expired token (code: $code, reason: $reason)');
             ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-            disconnect();
+            disconnect(clearRooms: true);
             return;
           }
           _handleDisconnect();
@@ -130,7 +140,7 @@ class WebSocketService {
   }
 
   Future<void> reconnectWithNewToken([String? freshToken]) async {
-    disconnect();
+    disconnect(clearRooms: true);
     if (freshToken != null && freshToken.isNotEmpty) {
       await _storage.saveToken(freshToken);
     }
@@ -210,7 +220,10 @@ class WebSocketService {
     }
   }
 
-  void disconnect() {
+  void disconnect({bool clearRooms = false}) {
+    if (clearRooms) {
+      _joinedRooms.clear();
+    }
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _pingTimer?.cancel();
@@ -223,8 +236,12 @@ class WebSocketService {
     _channel = null;
   }
 
+  void clearRooms() {
+    _joinedRooms.clear();
+  }
+
   void dispose() {
-    disconnect();
+    disconnect(clearRooms: true);
     _controller.close();
   }
 }

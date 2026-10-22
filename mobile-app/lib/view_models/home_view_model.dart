@@ -5,6 +5,7 @@ import '../models/log.model.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/device_cache_manager.dart';
+import '../services/secure_storage.dart';
 import '../services/websocket_service.dart';
 
 class HomeViewModel extends ChangeNotifier {
@@ -12,6 +13,7 @@ class HomeViewModel extends ChangeNotifier {
   final WebSocketService _ws = WebSocketService();
   final ConnectivityService _connectivity = ConnectivityService();
   final DeviceCacheManager _cacheManager = DeviceCacheManager();
+  final SecureStorage _storage = SecureStorage();
 
   Timer? _pollTimer;
   StreamSubscription<String>? _sessionExpirySub;
@@ -60,9 +62,7 @@ class HomeViewModel extends ChangeNotifier {
     // Listen for global session expiry events (from 401s or WS 4401 close code)
     _sessionExpirySub?.cancel();
     _sessionExpirySub = ApiService.onSessionExpired.stream.listen((_) {
-      _connectionIssue = ConnectionIssue.none;
-      _devices = [];
-      notifyListeners();
+      reset();
     });
 
     // 1. Perform fast startup connectivity diagnosis (<1.5s)
@@ -182,6 +182,12 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _fetchDevicesSilent() async {
+    final hasToken = await _storage.hasToken();
+    if (!hasToken) {
+      reset();
+      return;
+    }
+
     try {
       final devicesData = await _api.getDevices();
       _failedPollAttempts = 0;
@@ -207,6 +213,7 @@ class HomeViewModel extends ChangeNotifier {
     } catch (e) {
       final errLower = e.toString().toLowerCase();
       if (errLower.contains('401') || errLower.contains('unauthorized')) {
+        reset();
         return;
       }
       _failedPollAttempts++;
@@ -429,6 +436,18 @@ class HomeViewModel extends ChangeNotifier {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void reset() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _isInitialized = false;
+    _devices = [];
+    _logs = [];
+    _selectedDeviceId = null;
+    _connectionIssue = ConnectionIssue.none;
+    _ws.disconnect();
     notifyListeners();
   }
 

@@ -8,6 +8,7 @@ import '../settings/widgets/edit_profile_modal.dart';
 import '../widgets/add_locker_dialog.dart';
 import '../widgets/connection_warning_card.dart';
 import '../widgets/glass_theme.dart';
+import '../widgets/order_locker_modal.dart';
 import 'widgets/co_owner_invite_sheet.dart';
 import 'widgets/home_bottom_nav.dart';
 import 'widgets/home_empty_state.dart';
@@ -52,6 +53,102 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     AddLockerDialog.show(context);
+  }
+
+  void _showOrderLocker(BuildContext context) {
+    if (context.read<HomeViewModel>().isOffline) {
+      _showOfflineWarning(context);
+      return;
+    }
+    OrderLockerModal.show(context);
+  }
+
+  bool _didPromptNewUser = false;
+
+  void _maybePromptNewUser() {
+    if (_didPromptNewUser) return;
+    final home = context.read<HomeViewModel>();
+    final auth = context.read<AuthViewModel>();
+
+    if (!home.loading && home.devices.isEmpty && auth.user != null && auth.user?.orderStatus == null) {
+      _didPromptNewUser = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showNewUserWelcomeModal(context);
+      });
+    }
+  }
+
+  void _showNewUserWelcomeModal(BuildContext context) {
+    showParcelGlassDialog(
+      context: context,
+      width: 340,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: ParcelGlassColors.parcelBrown.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.local_shipping_rounded, size: 36, color: ParcelGlassColors.parcelBrown),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'WELCOME TO SECURE BOX',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: ParcelGlassColors.navyTitle,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'You don\'t have any lockers linked yet. Would you like to request your doorstep smart locker, or link an existing box?',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: ParcelGlassColors.slateSubtitle, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                OrderLockerModal.show(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ParcelGlassColors.parcelBrown,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.add_shopping_cart, size: 18),
+              label: const Text('ORDER SMART LOCKER', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                AddLockerDialog.show(context);
+              },
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.80), width: 1.2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.qr_code, size: 18, color: ParcelGlassColors.navyTitle),
+              label: const Text('ENTER DEVICE CODE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: ParcelGlassColors.navyTitle)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showInviteSheet(BuildContext context, String deviceId, String deviceName) {
@@ -234,6 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final devices = homeVM.devices;
 
     if (devices.isEmpty) {
+      _maybePromptNewUser();
       return RefreshIndicator(
         color: ParcelGlassColors.accentBlue,
         onRefresh: () => homeVM.fetchDevices(),
@@ -269,6 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       loading: homeVM.loading,
                       isOffline: homeVM.isOffline,
                       onAddLocker: () => _showAddLocker(context),
+                      onOrderLocker: () => _showOrderLocker(context),
                     ),
                     const SizedBox(height: 10),
                   ],

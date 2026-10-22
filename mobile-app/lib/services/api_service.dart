@@ -212,6 +212,25 @@ class ApiService {
     } catch (_) {}
   }
 
+  // 3d. Place / Request Smart Locker Order
+  Future<Map<String, dynamic>> placeOrder({
+    required String address,
+    String? pincode,
+    int units = 1,
+  }) async {
+    try {
+      final dio = await authDio;
+      final response = await dio.post('/api/auth/order', data: {
+        'address': address.trim(),
+        if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
+        'units': units,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      throw Exception(extractErrorMessage(e, 'Failed to place locker order'));
+    }
+  }
+
   // 4. Device Management
   Future<List<dynamic>> getDevices() async {
     try {

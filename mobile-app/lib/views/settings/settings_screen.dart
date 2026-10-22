@@ -8,6 +8,7 @@ import 'widgets/edit_profile_modal.dart';
 import 'widgets/manage_users_dialog.dart';
 import 'widgets/rename_device_modal.dart';
 import 'widgets/setting_capsule_tile.dart';
+import '../widgets/order_locker_modal.dart';
 
 import 'widgets/settings_modals.dart';
 import 'widgets/settings_profile_card.dart';
@@ -129,6 +130,18 @@ class SettingsScreen extends StatelessWidget {
                 onTap: home.isOffline ? () => _showOfflineWarning(context) : () => ManageUsersDialog.show(context),
               ),
 
+              // Order New Locker Box
+              SettingCapsuleTile(
+                icon: Icons.local_shipping_outlined,
+                title: 'Order New Locker',
+                subtitle: user?.orderStatus != null && user!.orderStatus != 'none'
+                    ? 'Status: ${user.orderStatus!.toUpperCase()} • Free Doorstep Request'
+                    : 'Request additional smart locker units for your home',
+                onTap: home.isOffline
+                    ? () => _showOfflineWarning(context)
+                    : () => OrderLockerModal.show(context),
+              ),
+
               // 4. Device & Network
               SettingCapsuleTile(
                 icon: Icons.wifi,
@@ -165,6 +178,7 @@ class SettingsScreen extends StatelessWidget {
               // 6. Log Out Button
               SettingsSignOutButton(
                 onSignOut: () async {
+                  context.read<HomeViewModel>().reset();
                   await auth.logout();
                   if (context.mounted) {
                     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);

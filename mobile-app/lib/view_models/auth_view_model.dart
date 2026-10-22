@@ -241,10 +241,41 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> placeLockerOrder({
+    required String address,
+    String? pincode,
+    int units = 1,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.placeOrder(
+        address: address,
+        pincode: pincode,
+        units: units,
+      );
+      if (response['user'] != null) {
+        await _storage.saveUserData(jsonEncode(response['user']));
+        _user = UserModel.fromJson(response['user']);
+      }
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     _errorDismissTimer?.cancel();
     _error = null;
-    WebSocketService().disconnect();
+    WebSocketService().disconnect(clearRooms: true);
     try {
       await _api.logout();
     } catch (_) {}

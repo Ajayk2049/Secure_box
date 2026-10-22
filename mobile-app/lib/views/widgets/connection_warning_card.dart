@@ -31,6 +31,7 @@ class _ConnectionWarningCardState extends State<ConnectionWarningCard> {
   }
 
   void _handleReauth() {
+    context.read<HomeViewModel>().reset();
     context.read<AuthViewModel>().logout();
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }

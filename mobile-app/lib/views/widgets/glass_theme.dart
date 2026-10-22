@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
@@ -149,8 +150,8 @@ class LiquidParcelCard extends StatelessWidget {
   }
 }
 
-/// Ultra-smooth popup dialog with authentic liquid glass aesthetics from liquid_glass_easy,
-/// zero shader recompilation jitter, and smooth scale + fade entrance.
+/// Hardware-accelerated popup dialog with Flutter's default smooth platform transition (DialogRoute)
+/// and authentic frosted glass aesthetics suited for all devices (including low- and mid-range GPUs).
 Future<T?> showParcelGlassDialog<T>({
   required BuildContext context,
   required Widget child,
@@ -159,72 +160,89 @@ Future<T?> showParcelGlassDialog<T>({
   double cornerRadius = 28,
   bool barrierDismissible = true,
 }) {
-  return showLiquidGlassDialog<T>(
+  return showDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
     barrierColor: Colors.black.withValues(alpha: 0.38),
-    transitionDuration: const Duration(milliseconds: 200),
-    transitionCurve: Curves.easeOutCubic,
-    reverseTransitionCurve: Curves.easeInCubic,
-    builder: (ctx) => Builder(
-      builder: (dialogContext) {
-        final mediaQuery = MediaQuery.of(dialogContext);
-        final keyboardBottom = mediaQuery.viewInsets.bottom;
-        final viewPadding = mediaQuery.viewPadding;
-        final verticalPadding = padding is EdgeInsets ? padding.vertical : 40.0;
-        final availableContentHeight = (mediaQuery.size.height -
-                keyboardBottom -
-                viewPadding.top -
-                viewPadding.bottom -
-                verticalPadding -
-                24)
-            .clamp(140.0, double.infinity);
+    builder: (dialogContext) {
+      final mediaQuery = MediaQuery.of(dialogContext);
+      final keyboardBottom = mediaQuery.viewInsets.bottom;
+      final viewPadding = mediaQuery.viewPadding;
+      final verticalPadding = padding is EdgeInsets ? padding.vertical : 40.0;
+      final availableContentHeight = (mediaQuery.size.height -
+              keyboardBottom -
+              viewPadding.top -
+              viewPadding.bottom -
+              verticalPadding -
+              24)
+          .clamp(140.0, double.infinity);
 
-        return AnimatedPadding(
-          padding: EdgeInsets.only(bottom: keyboardBottom),
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          child: LiquidGlassDialog(
-            width: width,
-            padding: padding,
-            style: LiquidGlassStyle(
-              shape: LiquidGlassShape.continuousRoundedRectangle(
-                cornerRadius: cornerRadius,
-                borderWidth: 1.2,
-                borderColor: Colors.white.withValues(alpha: 0.70),
-              ),
-              appearance: LiquidGlassAppearance(
-                color: Colors.white.withValues(alpha: 0.40),
-                blur: const LiquidGlassBlur(sigmaX: 10, sigmaY: 10),
-                shadow: const LiquidGlassShadow(
-                  blur: 24,
-                  opacity: 0.16,
-                  color: Color(0xFF3D2310),
-                  offset: Offset(0, 10),
-                ),
-              ),
-              refraction: const LiquidGlassRefraction(
-                distortion: 0.10,
-                distortionWidth: 24,
-                chromaticAberration: 0.002,
-              ),
-            ),
+      return AnimatedPadding(
+        padding: EdgeInsets.only(bottom: keyboardBottom),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: Center(
+          child: RepaintBoundary(
             child: Material(
               type: MaterialType.transparency,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: availableContentHeight,
+              child: Container(
+                width: width,
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(cornerRadius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF3D2310).withValues(alpha: 0.16),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      blurRadius: 8,
+                      offset: const Offset(0, -1),
+                    ),
+                  ],
                 ),
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: child,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(cornerRadius),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                    child: Container(
+                      padding: padding,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(cornerRadius),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.70),
+                          width: 1.2,
+                        ),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.40),
+                            Colors.white.withValues(alpha: 0.20),
+                          ],
+                        ),
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: availableContentHeight,
+                        ),
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        );
-      },
-    ),
+        ),
+      );
+    },
   );
 }
 
