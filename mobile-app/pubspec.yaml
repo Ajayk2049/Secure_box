@@ -15,6 +15,7 @@ dependencies:
   google_fonts: ^6.2.1
   web_socket_channel: ^3.0.2
   liquid_glass_easy: ^4.3.1
+  geolocator: ^14.0.2
 
 dev_dependencies:
   flutter_test:

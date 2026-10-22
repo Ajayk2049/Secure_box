@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../services/location_service.dart';
 import '../../view_models/auth_view_model.dart';
 import 'glass_theme.dart';
 
@@ -25,11 +26,13 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
   final _pincodeController = TextEditingController();
   int _units = 1;
   bool _isSubmitting = false;
+  bool _isLocating = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _addressController.addListener(_onAddressChanged);
     final user = context.read<AuthViewModel>().user;
     if (user?.address != null && user!.address!.isNotEmpty) {
       _addressController.text = user.address!;
@@ -39,8 +42,13 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
     }
   }
 
+  void _onAddressChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _addressController.removeListener(_onAddressChanged);
     _addressController.dispose();
     _pincodeController.dispose();
     super.dispose();
@@ -49,6 +57,58 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
   bool get _isNonBangalorePin {
     final pin = _pincodeController.text.trim();
     return pin.length == 6 && !pin.startsWith('560');
+  }
+
+  Future<void> _handleAutoLocate() async {
+    setState(() {
+      _isLocating = true;
+      _errorMessage = null;
+    });
+
+    final result = await LocationService.getCurrentAddress();
+    if (!mounted) return;
+
+    setState(() => _isLocating = false);
+
+    if (result.hasError) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.error!),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    if (result.address.isNotEmpty) {
+      _addressController.text = result.address;
+    }
+    if (result.pincode != null && result.pincode!.isNotEmpty) {
+      _pincodeController.text = result.pincode!;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.gps_fixed, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Location detected from GPS! Feel free to edit or add details.',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: ParcelGlassColors.mintSignal,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _handleSubmit() async {
@@ -136,7 +196,7 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'ORDER SMART LOCKER',
+                'ORDER SECURE BOX',
                 style: TextStyle(
                   color: primaryTextColor,
                   fontSize: 15,
@@ -171,26 +231,12 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
               Expanded(
                 child: Text(
                   '${user?.name ?? "Customer"} • ${user?.phone ?? ""}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: ParcelGlassColors.navyTitle,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: ParcelGlassColors.mintSignal.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text(
-                  'FREE DELIVERY',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w900,
-                    color: ParcelGlassColors.mintSignal,
-                    letterSpacing: 0.4,
                   ),
                 ),
               ),
@@ -200,9 +246,9 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
 
         const SizedBox(height: 14),
 
-        // Address Field
+        // Address Field Header
         const Text(
-          'DOORSTEP DELIVERY ADDRESS',
+          'DELIVERY ADDRESS',
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w800,
@@ -211,25 +257,64 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
           ),
         ),
         const SizedBox(height: 6),
-        TextField(
-          controller: _addressController,
-          maxLines: 2,
-          style: const TextStyle(fontSize: 13, color: ParcelGlassColors.navyTitle, fontWeight: FontWeight.w600),
-          decoration: InputDecoration(
-            hintText: 'Flat / Villa No, Apartment, Street Name, Area',
-            hintStyle: TextStyle(fontSize: 12, color: Colors.black.withValues(alpha: 0.35)),
-            filled: true,
-            fillColor: Colors.white.withValues(alpha: 0.45),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.65), width: 1.2),
+        Stack(
+          alignment: Alignment.topRight,
+          children: [
+            TextField(
+              controller: _addressController,
+              maxLines: 2,
+              style: const TextStyle(fontSize: 13, color: ParcelGlassColors.navyTitle, fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                hintText: 'Flat / Villa No, Apartment, Street Name, Area',
+                hintStyle: TextStyle(fontSize: 12, color: Colors.black.withValues(alpha: 0.35)),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.45),
+                contentPadding: EdgeInsets.only(
+                  left: 12,
+                  top: 10,
+                  bottom: 10,
+                  right: (_addressController.text.isEmpty || _isLocating) ? 38 : 12,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.65), width: 1.2),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: ParcelGlassColors.parcelBrown, width: 1.4),
+                ),
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: ParcelGlassColors.parcelBrown, width: 1.4),
-            ),
-          ),
+            if (_addressController.text.isEmpty || _isLocating)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Material(
+                  color: Colors.transparent,
+                  child: IconButton(
+                    tooltip: 'Use current location',
+                    onPressed: (_isLocating || _isSubmitting) ? null : _handleAutoLocate,
+                    splashRadius: 18,
+                    padding: const EdgeInsets.all(6),
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: _isLocating
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.8,
+                              color: ParcelGlassColors.parcelBrown,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.my_location,
+                            size: 18,
+                            color: ParcelGlassColors.parcelBrown,
+                          ),
+                  ),
+                ),
+              ),
+          ],
         ),
 
         const SizedBox(height: 12),
