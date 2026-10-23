@@ -2,6 +2,7 @@ import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { deviceSocketService } from "./deviceSocket.service.js";
+import { fcmService } from "./fcm.service.js";
 
 /**
  * Background watchdog worker: marks devices offline when no heartbeat or WebSocket frame received.
@@ -56,6 +57,7 @@ export async function checkDeviceWatchdog(): Promise<void> {
           doorState: dev.doorState,
         };
         wsService.broadcastToDeviceGroup([dev.deviceId, dev._id, dev.ownerId], offlineMsg);
+        fcmService.notifyDeviceOffline(dev).catch((e) => console.error("[FCM] Watchdog offline notice error:", e));
       }
     }
   } catch (err) {

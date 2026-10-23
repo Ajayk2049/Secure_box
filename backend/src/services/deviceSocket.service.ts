@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
+import { fcmService } from "./fcm.service.js";
 
 interface ConnectedDevice {
   ws: WebSocket;
@@ -109,6 +110,8 @@ class DeviceSocketService {
       doorStatus: deviceDoc.doorState === "closed" ? "locked" : "unlocked",
       online: true,
     });
+
+    fcmService.notifyDeviceOnline(deviceDoc).catch((e) => console.error("[FCM] Online notice error:", e));
   }
 
   /**
@@ -160,6 +163,8 @@ class DeviceSocketService {
         online: false,
         doorState: device.doorState,
       });
+
+      fcmService.notifyDeviceOffline(device).catch((e) => console.error("[FCM] Offline notice error:", e));
     } catch (err) {
       console.error(`[DEVICE-WS] Error handling disconnect for ${cleanId}:`, err);
     }
@@ -254,6 +259,10 @@ class DeviceSocketService {
         action: doorState === "open" ? "door_opened" : "door_closed",
         metadata: { source: "esp32_sensor", deviceId: cleanId },
       });
+
+      if (doorState === "open") {
+        fcmService.notifyLockerOpened(device).catch((e) => console.error("[FCM] Locker opened notice error:", e));
+      }
     }
 
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];

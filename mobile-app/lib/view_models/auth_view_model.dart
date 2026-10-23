@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/user.model.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import '../services/secure_storage.dart';
 import '../services/websocket_service.dart';
 
@@ -72,6 +73,7 @@ class AuthViewModel extends ChangeNotifier {
           if (res['user'] != null) {
             _user = UserModel.fromJson(res['user']);
             await _storage.saveUserData(jsonEncode(res['user']));
+            NotificationService().syncToken();
           }
         } catch (e) {
           final errStr = e.toString().toLowerCase();
@@ -205,6 +207,7 @@ class AuthViewModel extends ChangeNotifier {
         _user = UserModel.fromJson(response['user']);
       }
       WebSocketService().reconnectWithNewToken(response['token']);
+      NotificationService().syncToken();
       clearError();
       _loading = false;
       notifyListeners();

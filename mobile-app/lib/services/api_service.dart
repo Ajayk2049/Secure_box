@@ -385,6 +385,13 @@ class ApiService {
       throw Exception(extractErrorMessage(e, 'Failed to submit slot upgrade request'));
     }
   }
+
+  static Future<void> updateFcmToken(String fcmToken) async {
+    try {
+      final dio = await ApiService().authDio;
+      await dio.post('/api/user/fcm-token', data: {'fcmToken': fcmToken});
+    } catch (_) {}
+  }
 }
 
 

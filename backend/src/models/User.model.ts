@@ -13,6 +13,7 @@ export interface IUser extends Document {
   units?: number;
   orderStatus?: "pending" | "preparing" | "dispatched" | "delivered" | "approved" | "rejected";
   assignedDevices?: string[];
+  fcmTokens?: string[];
   failedLoginAttempts?: number;
   lockUntil?: Date;
   createdAt: Date;
@@ -74,6 +75,12 @@ const userSchema = new Schema<IUser>(
       enum: ["pending", "preparing", "dispatched", "delivered", "approved", "rejected"],
     },
     assignedDevices: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    fcmTokens: [
       {
         type: String,
         trim: true,

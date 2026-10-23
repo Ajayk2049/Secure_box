@@ -7,6 +7,8 @@ node_modules/
 .env.prod
 .env.local
 .env.*.local
+*firebase-service-account*.json
+*google-services*.json
 
 # Build outputs
 dist/
