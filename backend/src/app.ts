@@ -32,7 +32,7 @@ const fastify = Fastify({
 });
 
 function sanitizeLogUrl(url: string): string {
-  return url.replace(/([?&](?:token|adminToken)=)[^&]+/gi, "$1[REDACTED]");
+  return url.replace(/([?&](?:token|adminToken|deviceKey|key|apiKey|secret)=)[^&]+/gi, "$1[REDACTED]");
 }
 
 // Custom clean request and error hooks
@@ -59,6 +59,11 @@ function redactSensitiveData(data: any): any {
     "token",
     "refreshtoken",
     "devicekey",
+    "device_key",
+    "apikey",
+    "api_key",
+    "privatekey",
+    "private_key",
     "secret",
     "authorization",
     "admin_initial_password",
@@ -210,24 +215,70 @@ async function bootstrap() {
     const clientId = Math.random().toString(36).substring(7);
     wsService.addClient(clientId, socket, decodedUser.id, decodedUser.role || "user");
 
+    // Per-socket message rate limiting (Availability Hardening)
+    let messageCount = 0;
+    let windowStart = Date.now();
+    const unlockTimestamps: number[] = [];
+
     socket.on("message", async (message) => {
       try {
+        const now = Date.now();
+        // Reset 5-second window
+        if (now - windowStart > 5000) {
+          messageCount = 0;
+          windowStart = now;
+        }
+        messageCount++;
+        // Protect against WS message flood DoS (>40 messages / 5 seconds = 8 msg/s)
+        if (messageCount > 40) {
+          fastify.log.warn({ clientId, userId: decodedUser.id }, "[WS-FLOOD] Message rate limit exceeded. Dropping socket.");
+          socket.close(4429, "Too Many Messages");
+          return;
+        }
+
         const data = JSON.parse(message.toString());
         if (data.type === "PING") {
           socket.send(JSON.stringify({ type: "PONG" }));
           return;
         }
-        if (data.type === "JOIN_ROOM" && data.deviceId) {
+        if (data.type === "JOIN_ROOM" && typeof data.deviceId === "string") {
           await wsService.joinRoom(clientId, data.deviceId);
           return;
         }
-        if (data.type === "UNLOCK_DEVICE" && data.deviceId) {
+        if (data.type === "UNLOCK_DEVICE" && typeof data.deviceId === "string") {
+          // Zero Trust: Admins are strictly prohibited from unlocking customer lockers
+          if (decodedUser.role === "admin") {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: "Admins are strictly prohibited from unlocking customer lockers for security and privacy.",
+            }));
+            return;
+          }
+
+          // Per-socket unlock rate limiting (max 5 unlocks / 60s)
+          const recentUnlocks = unlockTimestamps.filter((t) => now - t < 60000);
+          if (recentUnlocks.length >= 5) {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: "Unlock rate limit exceeded. Please wait 1 minute before trying again.",
+            }));
+            return;
+          }
+          unlockTimestamps.push(now);
+
           try {
+            const rawDuration = typeof data.duration === "number" ? data.duration : 3000;
+            const clampedDuration = Math.min(Math.max(rawDuration, 1000), 10000); // 1s to 10s bounds
+
             const result = await deviceStatusService.executeUnlock(
               decodedUser.id,
               decodedUser.role || "user",
-              data.deviceId,
-              typeof data.duration === "number" ? data.duration : 3000
+              data.deviceId.trim(),
+              clampedDuration
             );
             socket.send(JSON.stringify({
               type: "UNLOCK_ACK",

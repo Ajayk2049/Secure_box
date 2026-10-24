@@ -65,22 +65,28 @@ export function isSilentTerminalPath(url: string, method: string): boolean {
   return false;
 }
 
+// Maximum log file size: 25 MB (prevents disk exhaustion on low-storage VPS)
+export const MAX_LOG_SIZE_BYTES = 25 * 1024 * 1024;
+
 /**
- * Prunes the log file so that only entries from the last 24 hours are retained.
- * Reads the existing log file, parses line timestamps, and atomically updates the file.
+ * Prunes the log file asynchronously:
+ * 1. Discards entries older than 24 hours.
+ * 2. Enforces a 25 MB maximum file size cap (retaining latest entries).
+ * 3. Uses purely non-blocking async operations so the Node.js event loop never freezes.
  */
 export async function pruneLogsOlderThan24Hours(): Promise<{ retained: number; pruned: number }> {
-  if (!fs.existsSync(logFilePath)) {
-    return { retained: 0, pruned: 0 };
-  }
-
-  const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
-  const tempPath = `${logFilePath}.tmp`;
-
-  let retainedCount = 0;
-  let prunedCount = 0;
-
   try {
+    const stats = await fs.promises.stat(logFilePath).catch(() => null);
+    if (!stats || stats.size === 0) {
+      return { retained: 0, pruned: 0 };
+    }
+
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const tempPath = `${logFilePath}.${Date.now()}.tmp`;
+
+    let retainedCount = 0;
+    let prunedCount = 0;
+
     const readStream = fs.createReadStream(logFilePath, { encoding: "utf-8" });
     const writeStream = fs.createWriteStream(tempPath, { encoding: "utf-8" });
 
@@ -94,7 +100,6 @@ export async function pruneLogsOlderThan24Hours(): Promise<{ retained: number; p
 
       try {
         const parsed = JSON.parse(line);
-        // Pino timestamps are either unix epoch numbers (e.g. 1790332671939) or ISO strings
         const timeVal = typeof parsed.time === "number" ? parsed.time : new Date(parsed.time).getTime();
 
         if (timeVal && timeVal >= twentyFourHoursAgo) {
@@ -104,7 +109,6 @@ export async function pruneLogsOlderThan24Hours(): Promise<{ retained: number; p
           prunedCount++;
         }
       } catch {
-        // If line is not JSON (e.g. manual output or corrupted line), retain if written recently
         writeStream.write(line + "\n");
         retainedCount++;
       }
@@ -115,19 +119,12 @@ export async function pruneLogsOlderThan24Hours(): Promise<{ retained: number; p
       writeStream.on("error", reject);
     });
 
-    // Replace old log file with pruned temp file
-    if (fs.existsSync(tempPath)) {
-      fs.copyFileSync(tempPath, logFilePath);
-      fs.unlinkSync(tempPath);
-    }
+    // Non-blocking async copy and cleanup (never blocks Node event loop)
+    await fs.promises.copyFile(tempPath, logFilePath);
+    await fs.promises.unlink(tempPath).catch(() => {});
 
     return { retained: retainedCount, pruned: prunedCount };
-  } catch (err) {
-    if (fs.existsSync(tempPath)) {
-      try {
-        fs.unlinkSync(tempPath);
-      } catch {}
-    }
-    return { retained: retainedCount, pruned: prunedCount };
+  } catch {
+    return { retained: 0, pruned: 0 };
   }
 }

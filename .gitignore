@@ -7,7 +7,11 @@ node_modules/
 .env.prod
 .env.local
 .env.*.local
+firebase-service-account.json
+**/firebase-service-account.json
 *firebase-service-account*.json
+google-services.json
+**/google-services.json
 *google-services*.json
 
 # Build outputs
@@ -56,6 +60,7 @@ coverage/
 progress.md
 task.md
 walkthrough.md
+deployment.md
 
 # Markdown Files (Except README.md and firmware.md)
 **/*.md

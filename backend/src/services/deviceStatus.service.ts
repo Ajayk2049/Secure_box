@@ -50,9 +50,10 @@ export class DeviceStatusService {
 
   /**
    * Helper to verify if user has access to a device.
+   * NOTE: Admins are strictly prohibited from unlocking customer lockers (Zero Trust & Privacy).
    */
   isAuthorizedUser(device: any, userId: string, role = "user"): boolean {
-    if (role === "admin") return true;
+    if (role === "admin") return false;
     if (!userId || !device) return false;
     const cleanUserId = userId.toString().trim();
     const ownerIdStr = (device.ownerId?._id || device.ownerId)?.toString().trim();
@@ -90,6 +91,11 @@ export class DeviceStatusService {
       online: boolean;
     };
   }> {
+    // Zero-Trust Guard: Admins are strictly prohibited from unlocking customer lockers
+    if (userRole === "admin") {
+      throw new Error("Admins are strictly prohibited from unlocking customer lockers for security and privacy.");
+    }
+
     const target = (deviceIdOrId || "").trim();
     if (!target) {
       throw new Error("Device ID is required");
