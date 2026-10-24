@@ -13,6 +13,7 @@ export interface IDevice extends Document {
   lastConnectedAt?: Date;
   lastDisconnectedAt?: Date;
   deviceKey?: string;
+  deviceKeyHash?: string;
   inviteCode?: string;
   inviteExpiresAt?: Date;
   createdAt: Date;
@@ -76,9 +77,16 @@ const deviceSchema = new Schema<IDevice>(
       type: Date,
       default: null,
     },
+    deviceKeyHash: {
+      type: String,
+      trim: true,
+      select: false,
+      index: true,
+    },
     deviceKey: {
       type: String,
       trim: true,
+      select: false,
     },
     inviteCode: {
       type: String,

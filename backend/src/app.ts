@@ -23,7 +23,7 @@ import { deviceWsRoute } from "./routes/deviceWs.route.js";
 import { simulatorHtml } from "./simulator.html.js";
 
 const fastify = Fastify({
-  trustProxy: true,
+  trustProxy: config.trustProxy,
   logger: {
     ...loggerConfig,
     stream: loggerStream,
@@ -302,7 +302,10 @@ async function bootstrap() {
           const query = (decodedUser.role === "admin")
             ? {}
             : { $or: [{ ownerId: decodedUser.id }, { coOwners: decodedUser.id }] };
-          const devices = await Device.find(query).populate("ownerId", "phone email name").lean();
+          const devices = await Device.find(query)
+            .select("-deviceKey -deviceKeyHash")
+            .populate("ownerId", "phone email name")
+            .lean();
           const enriched = devices.map((d: any) => deviceStatusService.enrichWithLiveStatus(d));
           socket.send(JSON.stringify({
             type: "DEVICES_UPDATE",
@@ -342,14 +345,14 @@ async function bootstrap() {
 
   // Start periodic watchdog timer for IoT device connectivity (runs every 4s for rapid offline detection)
   const watchdogInterval = setInterval(checkDeviceWatchdog, 4 * 1000);
-  // Prune logs older than 24 hours on startup and periodically every hour
+  // Rotate and prune logs on startup and periodically every 15 minutes (hourly rotation & 25 MB size cap check)
   pruneLogsOlderThan24Hours().catch(() => {});
   const logPruneInterval = setInterval(() => {
     pruneLogsOlderThan24Hours().catch((err) => {
       fastify.log.error(err, "Failed to prune logs older than 24 hours");
     });
-  }, 60 * 60 * 1000);
-  fastify.log.info("[CLEANUP] 24-hour log cleanup worker active (1h cycle)");
+  }, 15 * 60 * 1000);
+  fastify.log.info("[CLEANUP] Log rotation & 25 MB / 24-hour cleanup worker active (15m cycle)");
 
   // Graceful Shutdown Handlers (SIGTERM / SIGINT)
   const gracefulShutdown = async (signal: string) => {

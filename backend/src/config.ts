@@ -17,6 +17,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES_DAYS: z.string().default("7"),
   ALLOWED_ORIGINS: z.string().default(""),
+  TRUST_PROXY: z.string().default("false"),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -46,6 +47,15 @@ const parsedAllowedOrigins = _env.ALLOWED_ORIGINS.trim()
   ? _env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
   : defaultDevOrigins;
 
+function parseTrustProxy(val?: string): boolean | number | string | string[] {
+  if (!val || val.toLowerCase() === "false") return false;
+  if (val.toLowerCase() === "true") return true;
+  const num = Number(val);
+  if (!isNaN(num) && Number.isInteger(num) && num > 0) return num;
+  const ips = val.split(",").map((s) => s.trim()).filter(Boolean);
+  return ips.length === 1 ? ips[0]! : ips;
+}
+
 export const config = {
   port: parseInt(_env.PORT, 10),
   mongodbUri: _env.MONGODB_URI,
@@ -57,4 +67,5 @@ export const config = {
   otpTemplateId: _env.OTP_TEMPLATE_ID,
   demoMode: _env.DEMO_MODE.toLowerCase() === "true",
   allowedOrigins: parsedAllowedOrigins,
+  trustProxy: parseTrustProxy(_env.TRUST_PROXY),
 } as const;

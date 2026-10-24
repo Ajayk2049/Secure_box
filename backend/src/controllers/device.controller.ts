@@ -7,7 +7,7 @@ import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
 import { deviceSocketService } from "../services/deviceSocket.service.js";
 import { deviceStatusService } from "../services/deviceStatus.service.js";
-import { generateDeviceKey } from "./adminRequests.controller.js";
+import { generateDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
 export function isAuthorizedUser(device: any, userId: string): boolean {
@@ -19,21 +19,23 @@ export function isAuthorizedUser(device: any, userId: string): boolean {
   return Boolean(isOwner || isCoOwner);
 }
 
-// 1. Get all devices belonging to or shared with the logged-in user
+// 1. Get all devices belonging to or shared with the logged-in user (Keys strictly excluded)
 export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
   const user = request.user as { id: string };
   const devices = await Device.find({
     $or: [{ ownerId: user.id }, { coOwners: user.id }],
   })
+    .select("-deviceKey -deviceKeyHash")
     .populate("ownerId", "email name")
     .populate("coOwners", "email name")
     .lean();
 
   const userId = (user?.id || (user as any)?._id)?.toString().trim().toLowerCase();
-  const now = Date.now();
 
   const mapped = devices.map((d: any) => {
     const obj = { ...d };
+    delete (obj as any).deviceKey;
+    delete (obj as any).deviceKeyHash;
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
     const isActuallyOnline = deviceStatusService.resolveDeviceOnline(d.deviceId, d.online, d.lastHeartbeat);
@@ -67,6 +69,7 @@ export async function createDevice(request: FastifyRequest, reply: FastifyReply)
     return reply.status(409).send({ error: "Device ID is already claimed by another user" });
   }
 
+  const rawKey = generateDeviceKey();
   const newDevice = await Device.create({
     deviceId: cleanDeviceId,
     name: name.trim(),
@@ -76,10 +79,14 @@ export async function createDevice(request: FastifyRequest, reply: FastifyReply)
     doorState: "closed",
     online: false,
     lastHeartbeat: null,
-    deviceKey: generateDeviceKey(),
+    deviceKeyHash: hashDeviceKey(rawKey),
   });
 
-  return reply.status(201).send({ device: newDevice, message: "Device successfully paired" });
+  const devObj = newDevice.toObject();
+  delete (devObj as any).deviceKeyHash;
+  delete (devObj as any).deviceKey;
+
+  return reply.status(201).send({ device: devObj, message: "Device successfully paired" });
 }
 
 // 3. User authenticated unlock command (Primary Owner OR Co-Owner only - Admins restricted)

@@ -105,3 +105,16 @@ export async function adminFetch(
 
   return response;
 }
+
+export async function rotateDeviceKey(
+  deviceId: string
+): Promise<{ success: boolean; deviceKey: string; message: string; deviceId: string }> {
+  const res = await adminFetch(`/admin/devices/${encodeURIComponent(deviceId)}/rotate-key`, {
+    method: "POST",
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to rotate device key");
+  }
+  return data;
+}

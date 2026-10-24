@@ -19,8 +19,8 @@ import {
   updateDeviceName,
 } from "../controllers/device.controller.js";
 
+import { testUnlockDevice } from "../controllers/testDiagnostics.controller.js";
 import {
-  testUnlockDevice,
   getDeviceCommand,
   receiveTelemetry,
   receiveHeartbeat,

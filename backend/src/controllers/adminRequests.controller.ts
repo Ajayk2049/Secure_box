@@ -1,31 +1,11 @@
-import crypto from "crypto";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { LockerRequest } from "../models/LockerRequest.model.js";
 import { User } from "../models/User.model.js";
 import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { deviceStatusService } from "../services/deviceStatus.service.js";
-
-// Generates a cryptographically random, unguessable alphanumeric device ID like BOX_7K4M9Q
-export async function generateSecureDeviceId(): Promise<string> {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Removed similar looking chars (0, O, 1, I)
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const bytes = crypto.randomBytes(6);
-    let code = "";
-    for (let i = 0; i < 6; i++) {
-      code += chars[bytes[i] % chars.length];
-    }
-    const candidateId = `BOX_${code}`;
-    const exists = await Device.findOne({ deviceId: candidateId });
-    if (!exists) return candidateId;
-  }
-  return `BOX_${Date.now().toString(36).toUpperCase()}`;
-}
-
-// Generates a high-entropy secret hardware provision key for the ESP32
-export function generateDeviceKey(): string {
-  return `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
-}
+import { generateSecureDeviceId, generateDeviceKey, hashDeviceKey } from "../utils/crypto.js";
+export { generateDeviceKey, generateSecureDeviceId };
 
 // 1. Get all locker requests / orders
 export async function getAllRequests(request: FastifyRequest, reply: FastifyReply) {
@@ -69,22 +49,11 @@ export async function getAllRequests(request: FastifyRequest, reply: FastifyRepl
     .sort({ createdAt: -1 })
     .lean();
 
-  // Attach live device heartbeat, key and online status from Device model
+  // Attach live device heartbeat and online status from Device model (Keys strictly excluded)
   const allAssignedIds = requests.flatMap((r: any) => r.assignedDeviceIds || []);
   const devices = await Device.find({ deviceId: { $in: allAssignedIds } })
-    .select("deviceId online lastHeartbeat doorState deviceKey")
+    .select("deviceId online lastHeartbeat doorState")
     .lean();
-
-  // Auto-backfill deviceKey for older devices created prior to key generator
-  const devicesWithoutKey = devices.filter((d: any) => !d.deviceKey);
-  if (devicesWithoutKey.length > 0) {
-    await Promise.all(
-      devicesWithoutKey.map((d: any) => {
-        d.deviceKey = generateDeviceKey();
-        return Device.updateOne({ _id: d._id }, { $set: { deviceKey: d.deviceKey } });
-      })
-    );
-  }
 
   const deviceMap = new Map(devices.map((d: any) => [d.deviceId, d]));
 
@@ -95,7 +64,6 @@ export async function getAllRequests(request: FastifyRequest, reply: FastifyRepl
       const isOnline = d ? deviceStatusService.resolveDeviceOnline(id, d.online, d.lastHeartbeat) : false;
       return {
         deviceId: id,
-        deviceKey: d?.deviceKey || null,
         online: isOnline,
         lastHeartbeat: d ? d.lastHeartbeat : null,
         doorState: d ? d.doorState : "closed",
@@ -157,7 +125,8 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
       });
     }
 
-    let device = await Device.findOne({ deviceId: cleanDeviceId });
+    let rawKey = "";
+    let device = await Device.findOne({ deviceId: cleanDeviceId }).select("+deviceKeyHash +deviceKey");
     if (device) {
       if (device.ownerId && device.ownerId.toString() !== lockerReq.userId.toString()) {
         return reply.status(409).send({
@@ -165,11 +134,13 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
         });
       }
       device.ownerId = lockerReq.userId;
-      if (!device.deviceKey) {
-        device.deviceKey = generateDeviceKey();
+      if (!device.deviceKeyHash && !device.deviceKey) {
+        rawKey = generateDeviceKey();
+        device.deviceKeyHash = hashDeviceKey(rawKey);
       }
       await device.save();
     } else {
+      rawKey = generateDeviceKey();
       device = await Device.create({
         deviceId: cleanDeviceId,
         name: `${lockerReq.name}'s Secure Box`,
@@ -178,7 +149,7 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
         allowedSlots: 2,
         doorState: "closed",
         online: true,
-        deviceKey: generateDeviceKey(),
+        deviceKeyHash: hashDeviceKey(rawKey),
       });
     }
 
@@ -208,11 +179,18 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
       },
     });
 
+    const devObj = device.toObject();
+    delete (devObj as any).deviceKeyHash;
+    delete (devObj as any).deviceKey;
+    if (rawKey) {
+      (devObj as any).deviceKey = rawKey; // Show-once on Prepare step for flashing
+    }
+
     return reply.send({
       success: true,
       message: `Request accepted! Locker ${cleanDeviceId} assigned and in preparation.`,
       request: lockerReq,
-      device,
+      device: devObj,
     });
   }
 
@@ -222,26 +200,12 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
     lockerReq.dispatchedAt = new Date();
     if (notes) lockerReq.notes = notes.trim();
     await lockerReq.save();
-
-    await User.findByIdAndUpdate(lockerReq.userId, {
-      orderStatus: "dispatched",
-    });
-
+    await User.findByIdAndUpdate(lockerReq.userId, { orderStatus: "dispatched" });
     await Log.create({
       action: "order_dispatched",
-      metadata: {
-        requestId: lockerReq._id,
-        customerId: lockerReq.userId,
-        dispatchedBy: adminId,
-        assignedDevices: lockerReq.assignedDeviceIds,
-      },
+      metadata: { requestId: lockerReq._id, customerId: lockerReq.userId, dispatchedBy: adminId, assignedDevices: lockerReq.assignedDeviceIds },
     });
-
-    return reply.send({
-      success: true,
-      message: `Order for ${lockerReq.name} marked as dispatched. Out for delivery and installation.`,
-      request: lockerReq,
-    });
+    return reply.send({ success: true, message: `Order for ${lockerReq.name} marked as dispatched.`, request: lockerReq });
   }
 
   // Step 3: Delivered & Verified Live
@@ -251,33 +215,15 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
     if (verificationNotes) lockerReq.verificationNotes = verificationNotes.trim();
     if (notes) lockerReq.notes = notes.trim();
     await lockerReq.save();
-
-    await User.findByIdAndUpdate(lockerReq.userId, {
-      orderStatus: "delivered",
-    });
-
+    await User.findByIdAndUpdate(lockerReq.userId, { orderStatus: "delivered" });
     if (lockerReq.assignedDeviceIds?.length > 0) {
-      await Device.updateMany(
-        { deviceId: { $in: lockerReq.assignedDeviceIds } },
-        { online: true }
-      );
+      await Device.updateMany({ deviceId: { $in: lockerReq.assignedDeviceIds } }, { online: true });
     }
-
     await Log.create({
       action: "order_delivered",
-      metadata: {
-        requestId: lockerReq._id,
-        customerId: lockerReq.userId,
-        verifiedBy: adminId,
-        verificationNotes: lockerReq.verificationNotes,
-      },
+      metadata: { requestId: lockerReq._id, customerId: lockerReq.userId, verifiedBy: adminId, verificationNotes: lockerReq.verificationNotes },
     });
-
-    return reply.send({
-      success: true,
-      message: `Order for ${lockerReq.name} marked as delivered, installed, and verified live!`,
-      request: lockerReq,
-    });
+    return reply.send({ success: true, message: `Order for ${lockerReq.name} marked as delivered, installed, and verified live!`, request: lockerReq });
   }
 
   // Step 4: Rejected
@@ -288,25 +234,11 @@ export async function updateRequestStatus(request: FastifyRequest, reply: Fastif
     lockerReq.reviewedAt = new Date();
     if (adminId) lockerReq.reviewedBy = adminId as any;
     await lockerReq.save();
-
-    await User.findByIdAndUpdate(lockerReq.userId, {
-      orderStatus: "rejected",
-    });
-
+    await User.findByIdAndUpdate(lockerReq.userId, { orderStatus: "rejected" });
     await Log.create({
       action: "order_rejected",
-      metadata: {
-        requestId: lockerReq._id,
-        customerId: lockerReq.userId,
-        reason: lockerReq.rejectionReason,
-        rejectedBy: adminId,
-      },
+      metadata: { requestId: lockerReq._id, customerId: lockerReq.userId, reason: lockerReq.rejectionReason, rejectedBy: adminId },
     });
-
-    return reply.send({
-      success: true,
-      message: `Request for ${lockerReq.name} marked as rejected.`,
-      request: lockerReq,
-    });
+    return reply.send({ success: true, message: `Request for ${lockerReq.name} marked as rejected.`, request: lockerReq });
   }
 }

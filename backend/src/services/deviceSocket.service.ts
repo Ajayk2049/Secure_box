@@ -4,6 +4,7 @@ import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { fcmService } from "./fcm.service.js";
+import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 interface ConnectedDevice {
   ws: WebSocket;
@@ -28,7 +29,7 @@ class DeviceSocketService {
     }
 
     const cleanId = deviceId.trim().toUpperCase();
-    const device = await Device.findOne({ deviceId: cleanId });
+    const device = await Device.findOne({ deviceId: cleanId }).select("+deviceKeyHash +deviceKey");
     if (!device) {
       return { authorized: false, reason: `Device '${cleanId}' not found` };
     }
@@ -36,22 +37,30 @@ class DeviceSocketService {
     // Dev/demo mode bypass
     if (process.env.NODE_ENV !== "production") {
       if (process.env.DEMO_MODE === "true" || providedKey === "SIMULATOR_TEST_KEY") {
-        if (!device.deviceKey) {
-          device.deviceKey = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
+        if (!device.deviceKeyHash && !device.deviceKey) {
+          const generated = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
+          device.deviceKeyHash = hashDeviceKey(generated);
           await device.save();
         }
         return { authorized: true, device };
       }
     }
 
-    if (!device.deviceKey || !providedKey) {
+    if (!providedKey) {
       return { authorized: false, reason: "Missing deviceKey" };
     }
 
-    const providedBuf = Buffer.from(providedKey.trim());
-    const actualBuf = Buffer.from(device.deviceKey.trim());
-    if (providedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(providedBuf, actualBuf)) {
+    const authCheck = verifyDeviceKey(providedKey, device.deviceKeyHash, device.deviceKey);
+    if (!authCheck.valid) {
       return { authorized: false, reason: "Invalid deviceKey" };
+    }
+
+    // Zero-downtime auto-upgrade: upgrade legacy plaintext key to SHA-256 hash immediately
+    if (authCheck.needsMigration) {
+      device.deviceKeyHash = hashDeviceKey(providedKey);
+      device.deviceKey = undefined;
+      await device.save().catch((err) => console.error(`[AUTH-MIGRATION] Failed to upgrade device ${cleanId}:`, err));
+      console.log(`[AUTH-MIGRATION] Automatically upgraded device ${cleanId} to SHA-256 hash.`);
     }
 
     return { authorized: true, device };
