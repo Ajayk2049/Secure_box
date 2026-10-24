@@ -7,18 +7,9 @@ import { LockerRequest } from "../models/LockerRequest.model.js";
 import { smsService } from "../services/sms.service.js";
 import { TokenService } from "../services/token.service.js";
 import { verifyPassword, hashPassword } from "../utils/password.js";
+import { setAuthCookies, clearAuthCookies } from "../utils/cookieAuth.js";
+import { syncResolvedUnits } from "../utils/userUnits.js";
 import { config } from "../config.js";
-
-async function syncResolvedUnits(user: any): Promise<number> {
-  const reqs = await LockerRequest.find({ userId: user._id, status: { $ne: "rejected" } }).lean();
-  const total = reqs.reduce((sum: number, r: any) => sum + (r.units || 1), 0);
-  const resolved = Math.max(total, user.assignedDevices?.length || 0);
-  if (user.units !== resolved) {
-    user.units = resolved;
-    await user.save();
-  }
-  return resolved;
-}
 
 // 1. User Login (with Argon2id & legacy bcrypt auto-upgrade)
 export async function login(request: FastifyRequest, reply: FastifyReply) {
@@ -75,13 +66,9 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
     // 5 failed attempts -> 1 minute lockout
     // 10 failed attempts -> 15 minutes lockout
     // 15+ failed attempts -> 60 minutes lockout
-    if (attempts >= 15) {
-      user.lockUntil = new Date(Date.now() + 60 * 60 * 1000);
-    } else if (attempts >= 10) {
-      user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
-    } else if (attempts >= 5) {
-      user.lockUntil = new Date(Date.now() + 60 * 1000);
-    }
+    if (attempts >= 15) user.lockUntil = new Date(Date.now() + 60 * 60 * 1000);
+    else if (attempts >= 10) user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+    else if (attempts >= 5) user.lockUntil = new Date(Date.now() + 60 * 1000);
 
     await user.save();
     return reply.status(401).send({ error: "Invalid mobile number/email or password" });
@@ -111,6 +98,11 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
   const resolvedUnits = await syncResolvedUnits(user);
 
   const latestRequest = await LockerRequest.findOne({ userId: user._id }).sort({ createdAt: -1 });
+  const isAdmin = user.role === "admin";
+
+  if (isAdmin) {
+    setAuthCookies(request, reply, token, refreshToken);
+  }
 
   return reply.send({
     success: true,
@@ -126,8 +118,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
       orderStatus: latestRequest?.status || user.orderStatus,
       assignedDevices: latestRequest?.assignedDeviceIds || user.assignedDevices || [],
     },
-    token,
-    refreshToken,
+    ...(isAdmin ? {} : { token, refreshToken }),
   });
 }
 
@@ -233,7 +224,9 @@ export async function updateProfile(request: FastifyRequest, reply: FastifyReply
 
 // 4. Refresh Access Token with Token Rotation
 export async function refreshTokenHandler(request: FastifyRequest, reply: FastifyReply) {
-  const { refreshToken } = (request.body as { refreshToken?: string }) || {};
+  const cookieRefresh = (request as any).cookies?.admin_refresh_token;
+  const bodyRefresh = (request.body as { refreshToken?: string })?.refreshToken;
+  const refreshToken = cookieRefresh || bodyRefresh;
 
   if (!refreshToken) {
     return reply.status(400).send({ error: "Refresh token is required" });
@@ -241,11 +234,13 @@ export async function refreshTokenHandler(request: FastifyRequest, reply: Fastif
 
   const rotationResult = await TokenService.rotateRefreshToken(refreshToken);
   if (!rotationResult) {
+    clearAuthCookies(reply);
     return reply.status(401).send({ error: "Invalid or expired refresh token. Please sign in again." });
   }
 
   const user = await User.findById(rotationResult.userId);
   if (!user) {
+    clearAuthCookies(reply);
     return reply.status(401).send({ error: "User associated with token no longer exists" });
   }
 
@@ -256,20 +251,28 @@ export async function refreshTokenHandler(request: FastifyRequest, reply: Fastif
     role: user.role,
   });
 
+  const isAdmin = user.role === "admin" || Boolean(cookieRefresh);
+  if (isAdmin) {
+    setAuthCookies(request, reply, token, rotationResult.newRefreshToken);
+  }
+
   return reply.send({
     success: true,
-    token,
-    refreshToken: rotationResult.newRefreshToken,
+    ...(isAdmin ? {} : { token, refreshToken: rotationResult.newRefreshToken }),
   });
 }
 
 // 5. Logout & Revoke Refresh Token
 export async function logoutHandler(request: FastifyRequest, reply: FastifyReply) {
-  const { refreshToken } = (request.body as { refreshToken?: string }) || {};
+  const cookieRefresh = (request as any).cookies?.admin_refresh_token;
+  const bodyRefresh = (request.body as { refreshToken?: string })?.refreshToken;
+  const refreshToken = cookieRefresh || bodyRefresh;
 
   if (refreshToken) {
     await TokenService.revokeToken(refreshToken);
   }
+
+  clearAuthCookies(reply);
 
   return reply.send({
     success: true,
@@ -341,8 +344,5 @@ export async function resetPassword(request: FastifyRequest, reply: FastifyReply
   // Revoke all existing refresh tokens for security
   await TokenService.revokeAllUserTokens(user._id);
 
-  return reply.send({
-    success: true,
-    message: "Password reset successfully. Please sign in with your new password.",
-  });
+  return reply.send({ success: true, message: "Password reset successfully. Please sign in with your new password." });
 }

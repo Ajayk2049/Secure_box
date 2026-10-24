@@ -12,6 +12,11 @@ export default fp(async (fastify: FastifyInstance) => {
 
   fastify.decorate("authenticate", async (request: any, reply: any) => {
     try {
+      const cookieToken = request.cookies?.admin_token;
+      if (cookieToken) {
+        request.user = fastify.jwt.verify(cookieToken);
+        return;
+      }
       await request.jwtVerify();
     } catch (err) {
       reply.status(401).send({ error: "Unauthorized" });

@@ -15,13 +15,13 @@ class AdminWebSocketClient {
     }
     if (this.isConnecting) return;
 
-    const token = localStorage.getItem("admin_token");
-    if (!token) return;
+    const user = localStorage.getItem("admin_user");
+    if (!user) return;
 
     this.isConnecting = true;
     try {
       const baseUrl = getBackendBaseUrl();
-      const wsUrl = baseUrl.replace(/^http/, "ws") + `/ws?token=${encodeURIComponent(token)}`;
+      const wsUrl = baseUrl.replace(/^http/, "ws") + "/ws";
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

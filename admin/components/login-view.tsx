@@ -5,7 +5,7 @@ import { Box, Lock, Mail, AlertCircle, ArrowRight, Loader2, Sun, Moon, Eye, EyeO
 import { getApiUrl } from "@/lib/api";
 
 interface LoginViewProps {
-  onLoginSuccess: (user: any, token: string) => void;
+  onLoginSuccess: (user: any, token?: string) => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
 }
@@ -30,6 +30,7 @@ export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: Lo
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({
           email: email.trim(),
           password,
@@ -46,13 +47,9 @@ export function LoginView({ onLoginSuccess, theme = "light", onToggleTheme }: Lo
         throw new Error("Access Denied: This page is for administrators only.");
       }
 
-      localStorage.setItem("admin_token", data.token);
-      if (data.refreshToken) {
-        localStorage.setItem("admin_refresh_token", data.refreshToken);
-      }
       localStorage.setItem("admin_user", JSON.stringify(data.user));
 
-      onLoginSuccess(data.user, data.token);
+      onLoginSuccess(data.user);
     } catch (err: any) {
       setError(err.message || "Failed to sign in");
     } finally {

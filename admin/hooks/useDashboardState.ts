@@ -90,8 +90,8 @@ export function useDashboardState({ onLogout }: UseDashboardStateProps = {}) {
   const loadRequests = useCallback(
     async (silent = false) => {
       if (!silent) setIsLoading(true);
-      const token = localStorage.getItem("admin_token");
-      if (!token) {
+      const user = localStorage.getItem("admin_user");
+      if (!user) {
         if (!silent) setIsLoading(false);
         return;
       }
@@ -99,8 +99,6 @@ export function useDashboardState({ onLogout }: UseDashboardStateProps = {}) {
       try {
         const res = await adminFetch("/admin/requests");
         if (res.status === 401 || res.status === 403) {
-          localStorage.removeItem("admin_token");
-          localStorage.removeItem("admin_refresh_token");
           localStorage.removeItem("admin_user");
           if (onLogout) onLogout();
           return;

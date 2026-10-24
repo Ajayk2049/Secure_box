@@ -14,13 +14,9 @@ interface SimulatorModalProps {
 export function SimulatorModal({ data, onClose }: SimulatorModalProps) {
   const backendBase = getBackendBaseUrl();
 
-  const adminToken =
-    typeof window !== "undefined" ? localStorage.getItem("admin_token") || "" : "";
-
   const simulatorUrl =
     `${backendBase}/simulator?deviceId=${encodeURIComponent(data.deviceId)}` +
-    `&key=${encodeURIComponent(data.deviceKey || "SIMULATOR_TEST_KEY")}` +
-    (adminToken ? `&adminToken=${encodeURIComponent(adminToken)}` : "");
+    `&key=${encodeURIComponent(data.deviceKey || "SIMULATOR_TEST_KEY")}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">

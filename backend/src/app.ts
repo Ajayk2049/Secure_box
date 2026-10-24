@@ -15,6 +15,7 @@ import helmetPlugin from "./plugins/helmet.plugin.js";
 import websocketPlugin from "./plugins/websocket.plugin.js";
 import rateLimitPlugin from "./plugins/rateLimit.plugin.js";
 import mongoSanitizePlugin from "./plugins/mongoSanitize.plugin.js";
+import cookiePlugin from "./plugins/cookie.plugin.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import deviceRoutes from "./routes/device.routes.js";
@@ -132,6 +133,7 @@ async function bootstrap() {
   await fastify.register(helmetPlugin);
   await fastify.register(rateLimitPlugin);
   await fastify.register(mongoSanitizePlugin);
+  await fastify.register(cookiePlugin);
   await fastify.register(jwtPlugin);
   await fastify.register(websocketPlugin);
 
@@ -169,7 +171,8 @@ async function bootstrap() {
   // Virtual ESP32 Hardware Simulator GUI (Protected: disabled in production unless admin authenticated)
   fastify.get("/simulator", async (request, reply) => {
     if (process.env.NODE_ENV === "production") {
-      const token = (request.query as { token?: string })?.token;
+      const cookieToken = (request as any).cookies?.admin_token;
+      const token = cookieToken || (request.query as { token?: string })?.token;
       if (!token) {
         return reply.status(403).send({ error: "Simulator is disabled in production environments" });
       }
@@ -197,7 +200,11 @@ async function bootstrap() {
   fastify.get("/ws", { websocket: true }, async (socket, request) => {
     const query = request.query as { token?: string } | undefined;
     const authHeader = request.headers.authorization;
-    const token = query?.token || (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null);
+    const cookieToken = (request as any).cookies?.admin_token;
+    const token =
+      cookieToken ||
+      query?.token ||
+      (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null);
 
     if (!token) {
       socket.close(4401, "Authentication token required");
