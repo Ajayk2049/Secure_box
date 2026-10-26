@@ -4,6 +4,7 @@ import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { fcmService } from "./fcm.service.js";
+import { deviceNotificationService } from "./deviceNotification.service.js";
 import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 interface ConnectedDevice {
@@ -120,19 +121,19 @@ class DeviceSocketService {
       online: true,
     });
 
-    fcmService.notifyDeviceOnline(deviceDoc).catch((e) => console.error("[FCM] Online notice error:", e));
+    deviceNotificationService.handleDeviceOnline(deviceDoc);
   }
 
   /**
    * Handles hardware disconnect event immediately.
-   * If a newer active socket already replaced this one, stale socket close is ignored.
+   * If a newer active socket already replaced this one or socket is already disconnected, stale socket close is ignored.
    */
   async handleDisconnect(deviceId: string, ws?: WebSocket): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
     const current = this.devices.get(cleanId);
 
-    // Guard: If this disconnect event belongs to an old replaced socket, do not mark offline!
-    if (ws && current && current.ws !== ws) {
+    // Guard: If socket is already disconnected or belongs to an old replaced socket, do not process again
+    if (!current || (ws && current.ws !== ws)) {
       return;
     }
 
@@ -173,7 +174,7 @@ class DeviceSocketService {
         doorState: device.doorState,
       });
 
-      fcmService.notifyDeviceOffline(device).catch((e) => console.error("[FCM] Offline notice error:", e));
+      deviceNotificationService.scheduleOfflineNotification(device);
     } catch (err) {
       console.error(`[DEVICE-WS] Error handling disconnect for ${cleanId}:`, err);
     }
@@ -221,8 +222,8 @@ class DeviceSocketService {
     for (const [cleanId, conn] of this.devices.entries()) {
       const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
 
-      // If device missed 2 consecutive pings (approx 6-8s) or complete silence > 20s
-      if (conn.missedPings >= 2 || timeSinceHeartbeat > 20000) {
+      // If device missed 3 consecutive pings (approx 12-16s) or complete silence > 30s
+      if (conn.missedPings >= 3 || timeSinceHeartbeat > 30000) {
         console.log(
           `[DEVICE-WS] Device ${cleanId} unresponsive for ${Math.round(timeSinceHeartbeat / 1000)}s (missed ${conn.missedPings} pings). Terminating ghost socket.`
         );

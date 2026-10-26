@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import mongoose from "mongoose";
 import { config } from "./config.js";
 import { checkDeviceWatchdog } from "./services/deviceWatchdog.service.js";
+import { deviceNotificationService } from "./services/deviceNotification.service.js";
 import { wsService } from "./services/websocket.service.js";
 import { deviceStatusService } from "./services/deviceStatus.service.js";
 import { User } from "./models/User.model.js";
@@ -366,6 +367,7 @@ async function bootstrap() {
     fastify.log.info(`[SHUTDOWN] Received ${signal}. Draining requests and closing connections cleanly...`);
     clearInterval(watchdogInterval);
     clearInterval(logPruneInterval);
+    deviceNotificationService.clearAllTimers();
     try {
       await fastify.close();
       await mongoose.disconnect();

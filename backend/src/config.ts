@@ -18,6 +18,7 @@ const envSchema = z.object({
   REFRESH_TOKEN_EXPIRES_DAYS: z.string().default("7"),
   ALLOWED_ORIGINS: z.string().default(""),
   TRUST_PROXY: z.string().default("false"),
+  DEVICE_OFFLINE_GRACE_PERIOD_SEC: z.string().default("60"),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -68,4 +69,5 @@ export const config = {
   demoMode: _env.DEMO_MODE.toLowerCase() === "true",
   allowedOrigins: parsedAllowedOrigins,
   trustProxy: parseTrustProxy(_env.TRUST_PROXY),
+  deviceOfflineGracePeriodSec: parseInt(_env.DEVICE_OFFLINE_GRACE_PERIOD_SEC, 10) || 60,
 } as const;
