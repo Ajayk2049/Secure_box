@@ -48,6 +48,7 @@ class HomeViewModel extends ChangeNotifier {
   DateTime? get nextLogsCursor => _nextLogsCursor;
   bool get hasMoreLogs => _hasMoreLogs;
   bool get isLoadingMoreLogs => _isLoadingMoreLogs;
+  bool get isFetchingLogs => _isFetchingLogs;
   bool _isHistoryActive = false;
   bool get isHistoryActive => _isHistoryActive;
 
@@ -378,6 +379,9 @@ class HomeViewModel extends ChangeNotifier {
       _hasMoreLogs = true;
       _nextLogsCursor = null;
     }
+    if (_logs.isEmpty) {
+      notifyListeners();
+    }
 
     try {
       final now = DateTime.now();
@@ -387,25 +391,29 @@ class HomeViewModel extends ChangeNotifier {
         todayStart: todayStart,
         limit: 15,
       );
-      final rawLogs = (response['data'] as List<dynamic>?) ?? [];
+      final rawLogs = (response['logs'] as List<dynamic>?) ??
+          (response['data'] as List<dynamic>?) ??
+          [];
       _logs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
-      _hasMoreLogs = response['hasMore'] as bool? ?? false;
-      final cursorStr = response['nextCursor'] as String?;
-      _nextLogsCursor = cursorStr != null ? DateTime.tryParse(cursorStr) : null;
+      final hasMoreRaw = response['hasMore'];
+      _hasMoreLogs = hasMoreRaw is bool ? hasMoreRaw : false;
+      final cursorRaw = response['nextCursor'];
+      _nextLogsCursor = cursorRaw != null ? DateTime.tryParse(cursorRaw.toString()) : null;
 
       _ws.joinRoom(deviceId);
-      notifyListeners();
 
-      await _cacheManager.saveCachedLogs(deviceId, rawLogs);
+      if (rawLogs.isNotEmpty) {
+        await _cacheManager.saveCachedLogs(deviceId, rawLogs);
+      }
     } catch (e) {
       _error = e.toString();
       final cached = await _cacheManager.loadCachedLogs(deviceId);
       if (cached.isNotEmpty) {
         _logs = cached;
       }
-      notifyListeners();
     } finally {
       _isFetchingLogs = false;
+      notifyListeners();
     }
   }
 
@@ -422,21 +430,21 @@ class HomeViewModel extends ChangeNotifier {
         before: _nextLogsCursor,
         limit: 15,
       );
-      final rawLogs = (response['data'] as List<dynamic>?) ?? [];
+      final rawLogs = (response['logs'] as List<dynamic>?) ??
+          (response['data'] as List<dynamic>?) ??
+          [];
       final newLogs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
 
       final existingIds = _logs.map((l) => l.id).toSet();
       final uniqueNewLogs = newLogs.where((l) => !existingIds.contains(l.id)).toList();
       _logs.addAll(uniqueNewLogs);
 
-      _hasMoreLogs = response['hasMore'] as bool? ?? false;
-      final cursorStr = response['nextCursor'] as String?;
-      _nextLogsCursor = cursorStr != null ? DateTime.tryParse(cursorStr) : null;
-
-      notifyListeners();
+      final hasMoreRaw = response['hasMore'];
+      _hasMoreLogs = hasMoreRaw is bool ? hasMoreRaw : false;
+      final cursorRaw = response['nextCursor'];
+      _nextLogsCursor = cursorRaw != null ? DateTime.tryParse(cursorRaw.toString()) : null;
     } catch (e) {
       _error = e.toString();
-      notifyListeners();
     } finally {
       _isLoadingMoreLogs = false;
       notifyListeners();

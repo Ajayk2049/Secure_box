@@ -106,7 +106,7 @@ class _HomeHistoryTabState extends State<HomeHistoryTab> {
 
                 const SizedBox(height: 10),
 
-                if (home.loading)
+                if (home.loading || (home.isFetchingLogs && validLogs.isEmpty))
                   const Center(
                     child: Padding(
                       padding: EdgeInsets.symmetric(vertical: 40),
