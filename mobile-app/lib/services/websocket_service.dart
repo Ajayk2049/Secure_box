@@ -59,10 +59,9 @@ class WebSocketService {
               if (message['type'] == 'PONG') return;
               if (message['type'] == 'ERROR') {
                 final err = message['error']?.toString().toLowerCase() ?? '';
-                // Only authentication/token errors should trigger session expiration
+                // Only authentication/token errors should trigger token recovery
                 if (err.contains('token expired') || err.contains('invalid token') || err.contains('token required')) {
-                  ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-                  disconnect(clearRooms: true);
+                  _handleExpiredTokenAndReconnect();
                   return;
                 }
                 // Device-level room authorization errors should not expire the user session
@@ -87,9 +86,8 @@ class WebSocketService {
           final code = _channel?.closeCode;
           final reason = _channel?.closeReason;
           if (code == 4401 || (reason != null && (reason.toLowerCase().contains('expired') || reason.toLowerCase().contains('token')))) {
-            debugPrint('WebSocket closed due to expired token (code: $code, reason: $reason)');
-            ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-            disconnect(clearRooms: true);
+            debugPrint('WebSocket closed due to expired token (code: $code, reason: $reason). Attempting token refresh...');
+            _handleExpiredTokenAndReconnect();
             return;
           }
           _handleDisconnect();
@@ -236,8 +234,34 @@ class WebSocketService {
     _channel = null;
   }
 
-  void clearRooms() {
-    _joinedRooms.clear();
+  bool _isRefreshingToken = false;
+
+  Future<void> _handleExpiredTokenAndReconnect() async {
+    if (_isRefreshingToken) return;
+    _isRefreshingToken = true;
+
+    try {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _pingTimer?.cancel();
+      _pingTimer = null;
+      _isConnected = false;
+      _isConnecting = false;
+      try {
+        _channel?.sink.close();
+      } catch (_) {}
+      _channel = null;
+
+      final newToken = await ApiService().refreshToken();
+      if (newToken != null && newToken.isNotEmpty) {
+        debugPrint('WebSocket: Token refreshed successfully. Reconnecting WebSocket...');
+        connect();
+      } else {
+        debugPrint('WebSocket: Token refresh failed or session truly expired.');
+      }
+    } finally {
+      _isRefreshingToken = false;
+    }
   }
 
   void dispose() {

@@ -42,6 +42,12 @@ class HomeViewModel extends ChangeNotifier {
   ConnectionIssue get connectionIssue => _connectionIssue;
   bool get isOffline => _connectionIssue != ConnectionIssue.none;
   bool get isCheckingReachability => _isCheckingReachability;
+  bool _isHistoryActive = false;
+  bool get isHistoryActive => _isHistoryActive;
+
+  void setHistoryActive(bool active) {
+    _isHistoryActive = active;
+  }
 
   DeviceModel? get selectedDevice {
     if (_selectedDeviceId == null) return null;
@@ -77,13 +83,15 @@ class HomeViewModel extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     } else {
+      // 1. Fetch devices via HTTP first (verifies and refreshes tokens seamlessly if needed)
+      await fetchDevices();
+
+      // 2. Connect WebSocket after token is guaranteed fresh and valid
       _ws.connect();
       _wsMessageSub?.cancel();
       _wsMessageSub = _ws.stream.listen((message) {
         _handleWebSocketMessage(message);
       });
-      // Always get fresh live status directly from the server on startup
-      await fetchDevices();
     }
 
     _setupPollTimer();
@@ -120,7 +128,7 @@ class HomeViewModel extends ChangeNotifier {
   void _handleWebSocketMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString();
     final targetDeviceId = message['deviceId']?.toString();
-    if (type == 'EMERGENCY_UNLOCK' && targetDeviceId != null) {
+    if (type == 'EMERGENCY_UNLOCK' && targetDeviceId != null && _isHistoryActive) {
       fetchDeviceLogs(targetDeviceId);
     }
 
@@ -177,8 +185,10 @@ class HomeViewModel extends ChangeNotifier {
       _fetchDevicesSilent();
     }
 
-    // Live update history logs in real time whenever any device state change occurs!
-    fetchDeviceLogs(targetUpper);
+    // Only update history logs if user is actively viewing the History tab
+    if (_isHistoryActive) {
+      fetchDeviceLogs(targetUpper);
+    }
   }
 
   Future<void> _fetchDevicesSilent() async {
@@ -249,9 +259,8 @@ class HomeViewModel extends ChangeNotifier {
       _loading = false;
       notifyListeners();
 
-      if (_devices.isNotEmpty) {
-        final devId = _selectedDeviceId ?? _devices.first.deviceId;
-        fetchDeviceLogs(devId);
+      if (_devices.isNotEmpty && _selectedDeviceId == null) {
+        _selectedDeviceId = _devices.first.deviceId;
       }
     } catch (e) {
       _error = e.toString();

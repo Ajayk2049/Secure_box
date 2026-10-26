@@ -3,7 +3,7 @@ import 'package:dio/dio.dart';
 import '../config.dart';
 import 'api_error_handler.dart';
 import 'secure_storage.dart';
-import 'websocket_service.dart';
+import 'token_refresh_manager.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -22,6 +22,9 @@ class ApiService {
 
   final SecureStorage _storage = SecureStorage();
 
+  /// Refreshes the access token using TokenRefreshManager.
+  Future<String?> refreshToken() => TokenRefreshManager().refreshToken();
+
   Future<Dio> get authDio async {
     final token = await _storage.getToken();
     final dio = Dio(BaseOptions(
@@ -38,49 +41,27 @@ class ApiService {
       InterceptorsWrapper(
         onError: (DioException error, ErrorInterceptorHandler handler) async {
           if (error.response?.statusCode == 401 && !error.requestOptions.path.contains('/auth/refresh')) {
-            try {
-              final refreshToken = await _storage.getRefreshToken();
-              if (refreshToken != null && refreshToken.isNotEmpty) {
-                // Call /api/auth/refresh to rotate tokens
-                final refreshRes = await _client.post('/api/auth/refresh', data: {
-                  'refreshToken': refreshToken,
-                });
-
-                if (refreshRes.statusCode == 200 && refreshRes.data['token'] != null) {
-                  final newToken = refreshRes.data['token'];
-                  final newRefreshToken = refreshRes.data['refreshToken'];
-
-                  await _storage.saveToken(newToken);
-                  if (newRefreshToken != null) {
-                    await _storage.saveRefreshToken(newRefreshToken);
-                  }
-
-                  // Immediately reconnect WebSocket with the rotated access token
-                  WebSocketService().reconnectWithNewToken(newToken);
-
-                  // Retry the original failed request with the new access token
-                  final opts = error.requestOptions;
-                  opts.headers['Authorization'] = 'Bearer $newToken';
-                  final cloneReq = await dio.request(
-                    opts.path,
-                    options: Options(
-                      method: opts.method,
-                      headers: opts.headers,
-                    ),
-                    data: opts.data,
-                    queryParameters: opts.queryParameters,
-                  );
-                  return handler.resolve(cloneReq);
+            final newToken = await TokenRefreshManager().refreshToken();
+            if (newToken != null && newToken.isNotEmpty) {
+              final opts = error.requestOptions;
+              opts.headers['Authorization'] = 'Bearer $newToken';
+              try {
+                final cloneReq = await dio.request(
+                  opts.path,
+                  options: Options(
+                    method: opts.method,
+                    headers: opts.headers,
+                  ),
+                  data: opts.data,
+                  queryParameters: opts.queryParameters,
+                );
+                return handler.resolve(cloneReq);
+              } catch (retryErr) {
+                if (retryErr is DioException) {
+                  return handler.next(retryErr);
                 }
               }
-            } catch (_) {
-              // Token refresh failed or revoked
             }
-
-            // Both access and refresh tokens are invalid or expired
-            await _storage.deleteToken();
-            await _storage.deleteRefreshToken();
-            onSessionExpired.add("Your session has expired. Please sign in again.");
           }
           return handler.next(error);
         },

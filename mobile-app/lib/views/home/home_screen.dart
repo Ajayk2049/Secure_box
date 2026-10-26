@@ -189,7 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 RepaintBoundary(child: _buildHomeTab()),
                 const RepaintBoundary(child: HomeHistoryTab()),
                 RepaintBoundary(
-                  child: SettingsScreen(onBackToHome: () => setState(() => _currentTab = 0)),
+                  child: SettingsScreen(onBackToHome: () {
+                    setState(() => _currentTab = 0);
+                    context.read<HomeViewModel>().setHistoryActive(false);
+                  }),
                 ),
               ],
             ),
@@ -202,9 +205,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: HomeBottomNav(
                 selectedIndex: _currentTab,
                 onChanged: (index) {
+                  final homeVM = context.read<HomeViewModel>();
                   if (_currentTab == index) {
                     if (index == 1) {
-                      final homeVM = context.read<HomeViewModel>();
+                      homeVM.setHistoryActive(true);
                       final devId = homeVM.selectedDevice?.deviceId ??
                           (homeVM.devices.isNotEmpty ? homeVM.devices.first.deviceId : null);
                       if (devId != null) {
@@ -214,8 +218,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     return;
                   }
                   setState(() => _currentTab = index);
+                  homeVM.setHistoryActive(index == 1);
                   if (index == 1) {
-                    final homeVM = context.read<HomeViewModel>();
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!mounted) return;
                       final devId = homeVM.selectedDevice?.deviceId ??
