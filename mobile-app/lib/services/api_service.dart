@@ -248,11 +248,27 @@ class ApiService {
     }
   }
 
-  Future<List<dynamic>> getDeviceLogs(String deviceId) async {
+  Future<Map<String, dynamic>> getDeviceLogs(
+    String deviceId, {
+    DateTime? todayStart,
+    DateTime? before,
+    int limit = 15,
+  }) async {
     try {
       final dio = await authDio;
-      final response = await dio.get('/api/devices/$deviceId/logs');
-      return response.data['logs'];
+      final queryParams = <String, dynamic>{
+        'limit': limit,
+        if (todayStart != null) 'todayStart': todayStart.toUtc().toIso8601String(),
+        if (before != null) 'before': before.toUtc().toIso8601String(),
+      };
+      final response = await dio.get(
+        '/api/devices/$deviceId/logs',
+        queryParameters: queryParams,
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return {'logs': response.data?['logs'] ?? [], 'hasMore': false};
     } on DioException catch (e) {
       throw Exception(extractErrorMessage(e, 'Failed to load device logs'));
     }

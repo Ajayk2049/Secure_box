@@ -5,8 +5,35 @@ import '../../../view_models/home_view_model.dart';
 import '../../widgets/glass_theme.dart';
 import '../../widgets/parcel_history_tile.dart';
 
-class HomeHistoryTab extends StatelessWidget {
+class HomeHistoryTab extends StatefulWidget {
   const HomeHistoryTab({super.key});
+
+  @override
+  State<HomeHistoryTab> createState() => _HomeHistoryTabState();
+}
+
+class _HomeHistoryTabState extends State<HomeHistoryTab> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      context.read<HomeViewModel>().fetchMoreLogs();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,90 +64,140 @@ class HomeHistoryTab extends StatelessWidget {
         }
       },
       child: SingleChildScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
         padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 110),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 700),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header with Rewind Clock Icon
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(7),
-                      decoration: BoxDecoration(
-                        color: ParcelGlassColors.navyTitle.withValues(alpha: 0.08),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.history_rounded,
-                        color: ParcelGlassColors.navyTitle,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    const Text(
-                      'Activity History',
-                      style: TextStyle(
-                        color: ParcelGlassColors.navyTitle,
-                        fontSize: 25,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              if (home.loading)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: CircularProgressIndicator(color: ParcelGlassColors.accentBlue),
-                  ),
-                )
-              else if (validLogs.isEmpty)
-                LiquidParcelCard(
-                  useStaticGlass: true,
-                  borderRadius: 22,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with Rewind Clock Icon
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: Row(
                     children: [
-                      Icon(
-                        Icons.history_toggle_off,
-                        color: ParcelGlassColors.slateSubtitle,
-                        size: 22,
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: ParcelGlassColors.navyTitle.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.history_rounded,
+                          color: ParcelGlassColors.navyTitle,
+                          size: 22,
+                        ),
                       ),
-                      SizedBox(width: 12),
-                      Text(
-                        'No activity recorded yet',
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Activity History',
                         style: TextStyle(
-                          color: ParcelGlassColors.slateSubtitle,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                          color: ParcelGlassColors.navyTitle,
+                          fontSize: 25,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
                         ),
                       ),
                     ],
                   ),
-                )
-              else ...[
-                ..._buildGroupedLogs(validLogs),
+                ),
+
+                const SizedBox(height: 10),
+
+                if (home.loading)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: CircularProgressIndicator(color: ParcelGlassColors.accentBlue),
+                    ),
+                  )
+                else if (validLogs.isEmpty)
+                  LiquidParcelCard(
+                    useStaticGlass: true,
+                    borderRadius: 22,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.history_toggle_off,
+                          color: ParcelGlassColors.slateSubtitle,
+                          size: 22,
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          'No activity recorded yet',
+                          style: TextStyle(
+                            color: ParcelGlassColors.slateSubtitle,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  ..._buildGroupedLogs(validLogs),
+                  if (home.isLoadingMoreLogs)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: ParcelGlassColors.accentBlue,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!home.hasMoreLogs && validLogs.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20, bottom: 10),
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: ParcelGlassColors.navyTitle.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: ParcelGlassColors.navyTitle.withValues(alpha: 0.1),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 15,
+                                color: ParcelGlassColors.slateSubtitle,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                "You're all caught up • End of history",
+                                style: TextStyle(
+                                  color: ParcelGlassColors.slateSubtitle,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   List<Widget> _buildGroupedLogs(List<LogModel> logs) {
     final Map<String, List<LogModel>> grouped = {};

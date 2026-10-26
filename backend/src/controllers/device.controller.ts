@@ -112,10 +112,15 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
   }
 }
 
-// 4. Get recent access & delivery logs
+// 4. Get recent access & delivery logs (with Today-guaranteed initial page & cursor pagination)
 export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
   const user = request.user as { id: string };
+  const queryParams = (request.query as {
+    todayStart?: string;
+    before?: string;
+    limit?: string;
+  }) || {};
 
   let device = null;
   if (mongoose.Types.ObjectId.isValid(id)) {
@@ -133,14 +138,78 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
     return reply.status(403).send({ error: "Not authorized" });
   }
 
-  const logs = await Log.find({
+  const baseFilter = {
     $or: [{ deviceId: device._id }, { "metadata.deviceId": device.deviceId }],
     action: { $nin: ["door_open", "door_opened"] },
-  })
-    .sort({ timestamp: -1 })
-    .limit(100);
+  };
 
-  return reply.send({ logs });
+  const limit = Math.min(50, Math.max(1, parseInt(queryParams.limit || "15", 10)));
+  const { before, todayStart } = queryParams;
+
+  let logs: any[] = [];
+  let hasMore = false;
+
+  if (before) {
+    // Cursor-based pagination for older logs (Yesterday and earlier)
+    const beforeDate = new Date(before);
+    logs = await Log.find({
+      ...baseFilter,
+      timestamp: { $lt: beforeDate },
+    })
+      .sort({ timestamp: -1 })
+      .limit(limit + 1)
+      .lean();
+
+    if (logs.length > limit) {
+      hasMore = true;
+      logs.pop(); // Remove probe item
+    }
+  } else {
+    // Initial Load: Guarantee all of Today's activity + top up to limit with older logs if today < limit
+    const todayDate = todayStart ? new Date(todayStart) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const todayLogs = await Log.find({
+      ...baseFilter,
+      timestamp: { $gte: todayDate },
+    })
+      .sort({ timestamp: -1 })
+      .lean();
+
+    if (todayLogs.length >= limit) {
+      // If Today alone has >= limit items (e.g. 20, 25 items), return ALL of Today!
+      logs = todayLogs;
+      const olderCount = await Log.countDocuments({
+        ...baseFilter,
+        timestamp: { $lt: todayDate },
+      });
+      hasMore = olderCount > 0;
+    } else {
+      // If Today has fewer items, top up with older logs so initial view has at least 'limit' items
+      const needed = limit - todayLogs.length;
+      const olderLogs = await Log.find({
+        ...baseFilter,
+        timestamp: { $lt: todayDate },
+      })
+        .sort({ timestamp: -1 })
+        .limit(needed + 1)
+        .lean();
+
+      if (olderLogs.length > needed) {
+        hasMore = true;
+        olderLogs.pop(); // Remove probe item
+      }
+      logs = [...todayLogs, ...olderLogs];
+    }
+  }
+
+  const nextCursor = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+
+  return reply.send({
+    logs,
+    hasMore,
+    nextCursor,
+    count: logs.length,
+  });
 }
 
 // 5. Update Device / Box Name

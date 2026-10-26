@@ -29,6 +29,9 @@ class HomeViewModel extends ChangeNotifier {
   ConnectionIssue _connectionIssue = ConnectionIssue.none;
   bool _isDiagnosing = false;
   bool _isCheckingReachability = true;
+  DateTime? _nextLogsCursor;
+  bool _hasMoreLogs = true;
+  bool _isLoadingMoreLogs = false;
 
   int _failedPollAttempts = 0;
   static const int maxFailedAttempts = 3;
@@ -42,6 +45,9 @@ class HomeViewModel extends ChangeNotifier {
   ConnectionIssue get connectionIssue => _connectionIssue;
   bool get isOffline => _connectionIssue != ConnectionIssue.none;
   bool get isCheckingReachability => _isCheckingReachability;
+  DateTime? get nextLogsCursor => _nextLogsCursor;
+  bool get hasMoreLogs => _hasMoreLogs;
+  bool get isLoadingMoreLogs => _isLoadingMoreLogs;
   bool _isHistoryActive = false;
   bool get isHistoryActive => _isHistoryActive;
 
@@ -364,18 +370,33 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchDeviceLogs(String deviceId) async {
+  Future<void> fetchDeviceLogs(String deviceId, {bool refresh = true}) async {
     _selectedDeviceId = deviceId;
     if (_isFetchingLogs) return;
     _isFetchingLogs = true;
+    if (refresh) {
+      _hasMoreLogs = true;
+      _nextLogsCursor = null;
+    }
 
     try {
-      final logsData = await _api.getDeviceLogs(deviceId);
-      _logs = logsData.map((json) => LogModel.fromJson(json)).toList();
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final response = await _api.getDeviceLogs(
+        deviceId,
+        todayStart: todayStart,
+        limit: 15,
+      );
+      final rawLogs = (response['data'] as List<dynamic>?) ?? [];
+      _logs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
+      _hasMoreLogs = response['hasMore'] as bool? ?? false;
+      final cursorStr = response['nextCursor'] as String?;
+      _nextLogsCursor = cursorStr != null ? DateTime.tryParse(cursorStr) : null;
+
       _ws.joinRoom(deviceId);
       notifyListeners();
 
-      await _cacheManager.saveCachedLogs(deviceId, logsData);
+      await _cacheManager.saveCachedLogs(deviceId, rawLogs);
     } catch (e) {
       _error = e.toString();
       final cached = await _cacheManager.loadCachedLogs(deviceId);
@@ -385,6 +406,40 @@ class HomeViewModel extends ChangeNotifier {
       notifyListeners();
     } finally {
       _isFetchingLogs = false;
+    }
+  }
+
+  Future<void> fetchMoreLogs() async {
+    if (_isLoadingMoreLogs || !_hasMoreLogs || _selectedDeviceId == null || _nextLogsCursor == null) {
+      return;
+    }
+    _isLoadingMoreLogs = true;
+    notifyListeners();
+
+    try {
+      final response = await _api.getDeviceLogs(
+        _selectedDeviceId!,
+        before: _nextLogsCursor,
+        limit: 15,
+      );
+      final rawLogs = (response['data'] as List<dynamic>?) ?? [];
+      final newLogs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
+
+      final existingIds = _logs.map((l) => l.id).toSet();
+      final uniqueNewLogs = newLogs.where((l) => !existingIds.contains(l.id)).toList();
+      _logs.addAll(uniqueNewLogs);
+
+      _hasMoreLogs = response['hasMore'] as bool? ?? false;
+      final cursorStr = response['nextCursor'] as String?;
+      _nextLogsCursor = cursorStr != null ? DateTime.tryParse(cursorStr) : null;
+
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+    } finally {
+      _isLoadingMoreLogs = false;
+      notifyListeners();
     }
   }
 
@@ -455,6 +510,9 @@ class HomeViewModel extends ChangeNotifier {
     _devices = [];
     _logs = [];
     _selectedDeviceId = null;
+    _nextLogsCursor = null;
+    _hasMoreLogs = true;
+    _isLoadingMoreLogs = false;
     _connectionIssue = ConnectionIssue.none;
     _ws.disconnect();
     notifyListeners();
