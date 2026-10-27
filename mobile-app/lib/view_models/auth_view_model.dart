@@ -244,6 +244,28 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> updateNotificationPreferences({
+    required bool doorStatus,
+    required bool lockerConnectivity,
+  }) async {
+    try {
+      final response = await _api.updateNotificationPreferences(
+        doorStatus: doorStatus,
+        lockerConnectivity: lockerConnectivity,
+      );
+      if (response['user'] != null) {
+        await _storage.saveUserData(jsonEncode(response['user']));
+        _user = UserModel.fromJson(response['user']);
+        notifyListeners();
+      }
+      return true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      return false;
+    }
+  }
+
   Future<bool> placeLockerOrder({
     required String address,
     String? pincode,

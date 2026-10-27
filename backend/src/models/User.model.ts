@@ -1,5 +1,10 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface INotificationPreferences {
+  doorStatus: boolean;
+  lockerConnectivity: boolean;
+}
+
 export interface IUser extends Document {
   phone?: string;
   email?: string;
@@ -14,6 +19,7 @@ export interface IUser extends Document {
   orderStatus?: "pending" | "preparing" | "dispatched" | "delivered" | "approved" | "rejected";
   assignedDevices?: string[];
   fcmTokens?: string[];
+  notificationPreferences?: INotificationPreferences;
   failedLoginAttempts?: number;
   lockUntil?: Date;
   createdAt: Date;
@@ -86,6 +92,16 @@ const userSchema = new Schema<IUser>(
         trim: true,
       },
     ],
+    notificationPreferences: {
+      doorStatus: {
+        type: Boolean,
+        default: false,
+      },
+      lockerConnectivity: {
+        type: Boolean,
+        default: false,
+      },
+    },
     failedLoginAttempts: {
       type: Number,
       default: 0,

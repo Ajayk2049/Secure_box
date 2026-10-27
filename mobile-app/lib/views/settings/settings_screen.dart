@@ -7,9 +7,9 @@ import '../widgets/network_host_dialog.dart';
 import 'widgets/edit_profile_modal.dart';
 import 'widgets/manage_users_dialog.dart';
 import 'widgets/rename_device_modal.dart';
+import 'widgets/notification_preferences_modal.dart';
 import 'widgets/setting_capsule_tile.dart';
 import '../widgets/order_locker_modal.dart';
-
 import 'widgets/settings_modals.dart';
 import 'widgets/settings_profile_card.dart';
 import 'widgets/settings_sign_out_button.dart';
@@ -155,14 +155,8 @@ class SettingsScreen extends StatelessWidget {
               SettingCapsuleTile(
                 icon: Icons.notifications_none_outlined,
                 title: 'Notification Preferences',
-                subtitle: 'Parcel, System, Door Alerts',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Push notifications are active for deliveries and door alerts.'),
-                    ),
-                  );
-                },
+                subtitle: 'Door Status, Locker Connectivity',
+                onTap: () => NotificationPreferencesModal.show(context),
               ),
 
               // 5. About

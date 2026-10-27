@@ -310,6 +310,24 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> updateNotificationPreferences({
+    required bool doorStatus,
+    required bool lockerConnectivity,
+  }) async {
+    try {
+      final dio = await authDio;
+      final response = await dio.patch('/api/auth/profile', data: {
+        'notificationPreferences': {
+          'doorStatus': doorStatus,
+          'lockerConnectivity': lockerConnectivity,
+        },
+      });
+      return response.data;
+    } on DioException catch (e) {
+      throw Exception(extractErrorMessage(e, 'Failed to update notification preferences'));
+    }
+  }
+
   Future<Map<String, dynamic>> updateDeviceName(String deviceId, String name) async {
     try {
       final dio = await authDio;

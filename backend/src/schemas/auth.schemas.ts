@@ -49,6 +49,12 @@ export const placeOrderSchema = z.object({
 export const updateProfileSchema = z.object({
   name: z.string().min(1, "Name cannot be empty").optional(),
   email: z.string().email("Please enter a valid email address (e.g. name@example.com)").optional().or(z.literal("")),
+  notificationPreferences: z
+    .object({
+      doorStatus: z.boolean().optional(),
+      lockerConnectivity: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export const resetPasswordSchema = z.object({

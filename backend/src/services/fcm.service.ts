@@ -59,10 +59,27 @@ class FcmService {
 
       if (userIds.length === 0) return;
 
-      const users = await User.find({ _id: { $in: userIds } }).select("fcmTokens").lean();
+      const users = await User.find({ _id: { $in: userIds } })
+        .select("fcmTokens notificationPreferences")
+        .lean();
       const allTokens: string[] = [];
+      const eventType = extraData?.eventType;
 
       for (const u of users) {
+        // Push notifications are OFF by default unless explicitly enabled in user settings
+        const prefs = (u as any).notificationPreferences;
+        let isEnabledForUser = false;
+
+        if (eventType === "LOCKER_OPENED") {
+          isEnabledForUser = prefs?.doorStatus === true;
+        } else if (eventType === "DEVICE_OFFLINE" || eventType === "DEVICE_ONLINE") {
+          isEnabledForUser = prefs?.lockerConnectivity === true;
+        }
+
+        if (!isEnabledForUser) {
+          continue;
+        }
+
         if (Array.isArray(u.fcmTokens)) {
           for (const token of u.fcmTokens) {
             if (token && typeof token === "string" && !allTokens.includes(token)) {

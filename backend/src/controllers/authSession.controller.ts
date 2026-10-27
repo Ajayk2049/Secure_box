@@ -150,6 +150,10 @@ export async function getMe(request: FastifyRequest, reply: FastifyReply) {
       units: resolvedUnits,
       orderStatus: latestRequest?.status || user.orderStatus,
       assignedDevices: latestRequest?.assignedDeviceIds || user.assignedDevices || [],
+      notificationPreferences: {
+        doorStatus: user.notificationPreferences?.doorStatus ?? false,
+        lockerConnectivity: user.notificationPreferences?.lockerConnectivity ?? false,
+      },
       requestDetails: latestRequest
         ? {
             id: latestRequest._id,
@@ -163,14 +167,19 @@ export async function getMe(request: FastifyRequest, reply: FastifyReply) {
   });
 }
 
-// 3. Update User Profile (Name, Email)
+// 3. Update User Profile (Name, Email, Notification Preferences)
 export async function updateProfile(request: FastifyRequest, reply: FastifyReply) {
   const authUser = request.user as { id: string };
   if (!authUser?.id) {
     return reply.status(401).send({ error: "Unauthorized" });
   }
 
-  const { name, email } = (request.body as { name?: string; email?: string }) || {};
+  const { name, email, notificationPreferences } =
+    (request.body as {
+      name?: string;
+      email?: string;
+      notificationPreferences?: { doorStatus?: boolean; lockerConnectivity?: boolean };
+    }) || {};
 
   const user = await User.findById(authUser.id);
   if (!user) {
@@ -202,6 +211,19 @@ export async function updateProfile(request: FastifyRequest, reply: FastifyReply
     }
   }
 
+  if (notificationPreferences !== undefined) {
+    user.notificationPreferences = {
+      doorStatus:
+        typeof notificationPreferences.doorStatus === "boolean"
+          ? notificationPreferences.doorStatus
+          : user.notificationPreferences?.doorStatus ?? false,
+      lockerConnectivity:
+        typeof notificationPreferences.lockerConnectivity === "boolean"
+          ? notificationPreferences.lockerConnectivity
+          : user.notificationPreferences?.lockerConnectivity ?? false,
+    };
+  }
+
   await user.save();
 
   return reply.send({
@@ -218,6 +240,10 @@ export async function updateProfile(request: FastifyRequest, reply: FastifyReply
       units: user.units,
       orderStatus: user.orderStatus,
       assignedDevices: user.assignedDevices || [],
+      notificationPreferences: {
+        doorStatus: user.notificationPreferences?.doorStatus ?? false,
+        lockerConnectivity: user.notificationPreferences?.lockerConnectivity ?? false,
+      },
     },
   });
 }
