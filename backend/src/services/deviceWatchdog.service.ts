@@ -3,6 +3,7 @@ import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { deviceSocketService } from "./deviceSocket.service.js";
 import { deviceNotificationService } from "./deviceNotification.service.js";
+import { config } from "../config.js";
 
 /**
  * Background watchdog worker: marks devices offline when no heartbeat or WebSocket frame received.
@@ -14,7 +15,8 @@ export async function checkDeviceWatchdog(): Promise<void> {
     deviceSocketService.sweepConnections();
 
     // 2. Database safety sweep: catches any offline devices not covered by active sockets
-    const threshold = new Date(Date.now() - 30 * 1000);
+    const ghostCutoffMs = (config.deviceGhostTimeoutSec || 30) * 1000;
+    const threshold = new Date(Date.now() - ghostCutoffMs);
     const staleDevices = await Device.find({
       online: true,
       $or: [{ lastHeartbeat: { $lt: threshold } }, { lastHeartbeat: null }],

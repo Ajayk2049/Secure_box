@@ -351,8 +351,8 @@ async function bootstrap() {
   await User.collection.dropIndex("email_1").catch(() => {});
   await User.syncIndexes().catch(() => {});
 
-  // Start periodic watchdog timer for IoT device connectivity (runs every 4s for rapid offline detection)
-  const watchdogInterval = setInterval(checkDeviceWatchdog, 4 * 1000);
+  // Start periodic watchdog timer for IoT device connectivity (runs every 5s for rapid, non-destructive offline detection)
+  const watchdogInterval = setInterval(checkDeviceWatchdog, (config.deviceWatchdogIntervalSec || 5) * 1000);
   // Rotate and prune logs on startup and periodically every 15 minutes (hourly rotation & 25 MB size cap check)
   pruneLogsOlderThan24Hours().catch(() => {});
   const logPruneInterval = setInterval(() => {

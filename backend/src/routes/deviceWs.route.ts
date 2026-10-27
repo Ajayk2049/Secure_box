@@ -21,7 +21,7 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
         if (authResult.authorized) {
           authenticated = true;
           await deviceSocketService.registerDevice(deviceId, socket, authResult.device);
-          socket.send(JSON.stringify({ type: "AUTH_OK", deviceId }));
+          socket.send(JSON.stringify({ type: "AUTH_OK", deviceId, doorState: authResult.device.doorState }));
         } else {
           socket.close(4401, authResult.reason || "Unauthorized device");
           return;
@@ -57,7 +57,7 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
             if (authResult.authorized) {
               authenticated = true;
               await deviceSocketService.registerDevice(deviceId, socket, authResult.device);
-              socket.send(JSON.stringify({ type: "AUTH_OK", deviceId }));
+              socket.send(JSON.stringify({ type: "AUTH_OK", deviceId, doorState: authResult.device.doorState }));
               return;
             } else {
               socket.close(4401, authResult.reason || "Unauthorized device");
@@ -69,6 +69,9 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
             socket.close(4401, "Authentication required");
             return;
           }
+
+          // Unconditionally refresh RAM keepalive & reset missed ping counter on any message
+          deviceSocketService.touchActivity(deviceId);
 
           switch (data.type) {
             case "PING":

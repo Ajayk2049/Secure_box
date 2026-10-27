@@ -19,6 +19,8 @@ const envSchema = z.object({
   ALLOWED_ORIGINS: z.string().default(""),
   TRUST_PROXY: z.string().default("false"),
   DEVICE_OFFLINE_GRACE_PERIOD_SEC: z.string().default("60"),
+  DEVICE_WATCHDOG_INTERVAL_SEC: z.string().default("5"),
+  DEVICE_GHOST_TIMEOUT_SEC: z.string().default("30"),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -70,4 +72,6 @@ export const config = {
   allowedOrigins: parsedAllowedOrigins,
   trustProxy: parseTrustProxy(_env.TRUST_PROXY),
   deviceOfflineGracePeriodSec: parseInt(_env.DEVICE_OFFLINE_GRACE_PERIOD_SEC, 10) || 60,
+  deviceWatchdogIntervalSec: parseInt(_env.DEVICE_WATCHDOG_INTERVAL_SEC, 10) || 5,
+  deviceGhostTimeoutSec: parseInt(_env.DEVICE_GHOST_TIMEOUT_SEC, 10) || 30,
 } as const;

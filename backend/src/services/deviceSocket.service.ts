@@ -6,6 +6,7 @@ import { wsService } from "./websocket.service.js";
 import { fcmService } from "./fcm.service.js";
 import { deviceNotificationService } from "./deviceNotification.service.js";
 import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
+import { config } from "../config.js";
 
 interface ConnectedDevice {
   ws: WebSocket;
@@ -181,15 +182,23 @@ class DeviceSocketService {
   }
 
   /**
-   * Records proof-of-life on incoming native WebSocket pong or ping frame.
+   * Records proof-of-life on ANY incoming frame (telemetry, door event, ping, pong, heartbeat).
+   * Refreshes RAM heartbeat and resets missed ping count to prevent false ghost-socket drops.
    */
-  recordPong(deviceId: string): void {
+  touchActivity(deviceId: string): void {
     const cleanId = deviceId.trim().toUpperCase();
     const conn = this.devices.get(cleanId);
     if (conn) {
       conn.lastHeartbeat = new Date();
       conn.missedPings = 0;
     }
+  }
+
+  /**
+   * Records proof-of-life on incoming native WebSocket pong or ping frame.
+   */
+  recordPong(deviceId: string): void {
+    this.touchActivity(deviceId);
   }
 
   /**
@@ -201,12 +210,9 @@ class DeviceSocketService {
     telemetry?: { rssi?: number; battery?: number; uptime?: number }
   ): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
+    this.touchActivity(cleanId);
     const conn = this.devices.get(cleanId);
     const now = new Date();
-    if (conn) {
-      conn.lastHeartbeat = now;
-      conn.missedPings = 0;
-    }
 
     if (conn && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify({ type: "HEARTBEAT_ACK", timestamp: now.getTime() }));
@@ -214,16 +220,18 @@ class DeviceSocketService {
   }
 
   /**
-   * High-speed dead-socket sweeper: runs periodically (e.g. every 3s-5s).
-   * Actively sends RFC 6455 Ping frames and terminates unresponsive ghost sockets within 6-8s.
+   * Dead-socket sweeper: runs periodically (e.g. every 5s).
+   * Actively sends RFC 6455 Ping frames and terminates unresponsive ghost sockets after 25s–30s.
    */
   sweepConnections(): void {
     const now = Date.now();
+    const ghostCutoffMs = (config.deviceGhostTimeoutSec || 30) * 1000;
+
     for (const [cleanId, conn] of this.devices.entries()) {
       const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
 
-      // If device missed 3 consecutive pings (approx 12-16s) or complete silence > 30s
-      if (conn.missedPings >= 3 || timeSinceHeartbeat > 30000) {
+      // Ghost socket if device missed 5 consecutive pings (~25s) or total silence exceeds threshold (30s)
+      if (conn.missedPings >= 5 || timeSinceHeartbeat > ghostCutoffMs) {
         console.log(
           `[DEVICE-WS] Device ${cleanId} unresponsive for ${Math.round(timeSinceHeartbeat / 1000)}s (missed ${conn.missedPings} pings). Terminating ghost socket.`
         );
@@ -251,9 +259,12 @@ class DeviceSocketService {
 
   /**
    * Handles door state change telemetry from ESP32.
+   * Updates MongoDB cloud state as authoritative source of truth.
    */
   async handleDoorEvent(deviceId: string, doorState: "open" | "closed"): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
+    this.touchActivity(cleanId);
+
     const device = await Device.findOne({ deviceId: cleanId });
     if (!device) return;
 
