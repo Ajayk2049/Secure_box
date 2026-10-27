@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../main.dart';
 import '../models/user.model.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import '../services/secure_storage.dart';
 import '../services/websocket_service.dart';
 
@@ -14,13 +17,38 @@ class AuthViewModel extends ChangeNotifier {
   bool _initialized = false;
   String? _error;
   String? _savedIdentifier;
+  String? _avatarEmoji;
+  Timer? _errorDismissTimer;
 
   UserModel? get user => _user;
   bool get loading => _loading;
   bool get initialized => _initialized;
   String? get error => _error;
   String? get savedIdentifier => _savedIdentifier;
+  String? get avatarEmoji => _avatarEmoji;
   bool get isAuthenticated => _user != null;
+
+  Future<void> setAvatarEmoji(String? emoji) async {
+    _avatarEmoji = (emoji != null && emoji.trim().isNotEmpty) ? emoji.trim() : null;
+    await _storage.saveAvatarEmoji(_avatarEmoji);
+    notifyListeners();
+  }
+
+  void setErrorWithAutoDismiss(String message, [Duration duration = const Duration(seconds: 3)]) {
+    _error = message;
+    _errorDismissTimer?.cancel();
+    notifyListeners();
+    _errorDismissTimer = Timer(duration, () {
+      _error = null;
+      notifyListeners();
+    });
+  }
+
+  void clearError() {
+    _errorDismissTimer?.cancel();
+    _error = null;
+    notifyListeners();
+  }
 
   Future<void> init() async {
     _loading = true;
@@ -29,12 +57,14 @@ class AuthViewModel extends ChangeNotifier {
     // Listen for global session expiry events triggered by 401 responses
     ApiService.onSessionExpired.stream.listen((message) {
       _user = null;
-      _error = message;
-      notifyListeners();
+      setErrorWithAutoDismiss(message);
+      // Automatically redirect to login screen on session expiry
+      appNavigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
     });
 
     try {
       _savedIdentifier = await _storage.getSavedIdentifier();
+      _avatarEmoji = await _storage.getAvatarEmoji();
 
       final hasToken = await _storage.hasToken();
       if (hasToken) {
@@ -43,6 +73,7 @@ class AuthViewModel extends ChangeNotifier {
           if (res['user'] != null) {
             _user = UserModel.fromJson(res['user']);
             await _storage.saveUserData(jsonEncode(res['user']));
+            NotificationService().syncToken();
           }
         } catch (e) {
           final errStr = e.toString().toLowerCase();
@@ -52,7 +83,7 @@ class AuthViewModel extends ChangeNotifier {
             await _storage.deleteToken();
             await _storage.deleteRefreshToken();
             _user = null;
-            _error = "Your session has expired. Please sign in again.";
+            setErrorWithAutoDismiss("Your session has expired. Please sign in again.");
           } else {
             // Truly offline: restore cached profile
             final cached = await _storage.getUserData();
@@ -83,18 +114,40 @@ class AuthViewModel extends ChangeNotifier {
       notifyListeners();
       return response;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
-      return {'success': false, 'error': _error};
+      return {'success': false, 'error': err};
     }
   }
 
-  // 2. Register Account with OTP (+ optional Join Code)
+  // 1b. Check If Email Exists
+  Future<Map<String, dynamic>> checkEmail(String email) async {
+    try {
+      return await _api.checkEmail(email);
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      return {'exists': false, 'error': err};
+    }
+  }
+
+  // 1c. Check If Phone Exists
+  Future<Map<String, dynamic>> checkPhone(String phone) async {
+    try {
+      return await _api.checkPhone(phone);
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      return {'exists': false, 'error': err};
+    }
+  }
+
+  // 2. Register Account with OTP (+ optional Join Code & Email)
   Future<bool> registerWithOtp({
     required String phone,
     required String otp,
     required String password,
+    String? email,
     String? name,
     String? inviteCode,
   }) async {
@@ -107,6 +160,7 @@ class AuthViewModel extends ChangeNotifier {
         phone: phone,
         otp: otp,
         password: password,
+        email: email,
         name: name,
         inviteCode: inviteCode,
       );
@@ -121,11 +175,13 @@ class AuthViewModel extends ChangeNotifier {
         _user = UserModel.fromJson(response['user']);
       }
       WebSocketService().reconnectWithNewToken(response['token']);
+      clearError();
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -151,11 +207,14 @@ class AuthViewModel extends ChangeNotifier {
         _user = UserModel.fromJson(response['user']);
       }
       WebSocketService().reconnectWithNewToken(response['token']);
+      NotificationService().syncToken();
+      clearError();
       _loading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -177,7 +236,39 @@ class AuthViewModel extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString().replaceAll('Exception: ', '').trim();
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> placeLockerOrder({
+    required String address,
+    String? pincode,
+    int units = 1,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.placeOrder(
+        address: address,
+        pincode: pincode,
+        units: units,
+      );
+      if (response['user'] != null) {
+        await _storage.saveUserData(jsonEncode(response['user']));
+        _user = UserModel.fromJson(response['user']);
+      }
+      _loading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
       _loading = false;
       notifyListeners();
       return false;
@@ -185,16 +276,15 @@ class AuthViewModel extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    WebSocketService().disconnect();
-    await _api.logout();
+    _errorDismissTimer?.cancel();
+    _error = null;
+    WebSocketService().disconnect(clearRooms: true);
+    try {
+      await _api.logout();
+    } catch (_) {}
     await _storage.purgeAllSessionData();
     _user = null;
-    notifyListeners();
-  }
-
-  void clearError() {
     _error = null;
     notifyListeners();
   }
 }
-

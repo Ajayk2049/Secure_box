@@ -1,4 +1,4 @@
-package com.smartbox.smartbox_mobile
+package com.secure.box
 
 import io.flutter.embedding.android.FlutterActivity
 

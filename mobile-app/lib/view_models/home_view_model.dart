@@ -5,6 +5,7 @@ import '../models/log.model.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/device_cache_manager.dart';
+import '../services/secure_storage.dart';
 import '../services/websocket_service.dart';
 
 class HomeViewModel extends ChangeNotifier {
@@ -12,6 +13,7 @@ class HomeViewModel extends ChangeNotifier {
   final WebSocketService _ws = WebSocketService();
   final ConnectivityService _connectivity = ConnectivityService();
   final DeviceCacheManager _cacheManager = DeviceCacheManager();
+  final SecureStorage _storage = SecureStorage();
 
   Timer? _pollTimer;
   StreamSubscription<String>? _sessionExpirySub;
@@ -20,13 +22,16 @@ class HomeViewModel extends ChangeNotifier {
 
   List<DeviceModel> _devices = [];
   List<LogModel> _logs = [];
-  bool _loading = false;
+  bool _loading = true;
   String? _error;
   String? _selectedDeviceId;
   bool _isFetchingLogs = false;
   ConnectionIssue _connectionIssue = ConnectionIssue.none;
   bool _isDiagnosing = false;
   bool _isCheckingReachability = true;
+  DateTime? _nextLogsCursor;
+  bool _hasMoreLogs = true;
+  bool _isLoadingMoreLogs = false;
 
   int _failedPollAttempts = 0;
   static const int maxFailedAttempts = 3;
@@ -40,6 +45,16 @@ class HomeViewModel extends ChangeNotifier {
   ConnectionIssue get connectionIssue => _connectionIssue;
   bool get isOffline => _connectionIssue != ConnectionIssue.none;
   bool get isCheckingReachability => _isCheckingReachability;
+  DateTime? get nextLogsCursor => _nextLogsCursor;
+  bool get hasMoreLogs => _hasMoreLogs;
+  bool get isLoadingMoreLogs => _isLoadingMoreLogs;
+  bool get isFetchingLogs => _isFetchingLogs;
+  bool _isHistoryActive = false;
+  bool get isHistoryActive => _isHistoryActive;
+
+  void setHistoryActive(bool active) {
+    _isHistoryActive = active;
+  }
 
   DeviceModel? get selectedDevice {
     if (_selectedDeviceId == null) return null;
@@ -54,33 +69,36 @@ class HomeViewModel extends ChangeNotifier {
     if (_isInitialized) return;
     _isInitialized = true;
     _isCheckingReachability = true;
+    _loading = true;
+    notifyListeners();
 
     // Listen for global session expiry events (from 401s or WS 4401 close code)
     _sessionExpirySub?.cancel();
     _sessionExpirySub = ApiService.onSessionExpired.stream.listen((_) {
-      _connectionIssue = ConnectionIssue.sessionExpired;
-      _devices = _devices.map((d) => d.copyWith(online: false)).toList();
-      notifyListeners();
+      reset();
     });
 
-    // 1. Immediately load cached devices from storage
-    await _loadCachedDevices();
-
-    // 2. Perform fast startup connectivity diagnosis (<1.5s)
+    // 1. Perform fast startup connectivity diagnosis (<1.5s)
     final initialIssue = await _connectivity.checkConnectivity();
     _connectionIssue = initialIssue;
     _isCheckingReachability = false;
 
     if (initialIssue != ConnectionIssue.none) {
+      // If device is offline on app start, load cached names as fallback with offline status
+      await _loadCachedDevices();
       _devices = _devices.map((d) => d.copyWith(online: false)).toList();
+      _loading = false;
       notifyListeners();
     } else {
+      // 1. Fetch devices via HTTP first (verifies and refreshes tokens seamlessly if needed)
+      await fetchDevices();
+
+      // 2. Connect WebSocket after token is guaranteed fresh and valid
       _ws.connect();
       _wsMessageSub?.cancel();
       _wsMessageSub = _ws.stream.listen((message) {
         _handleWebSocketMessage(message);
       });
-      await fetchDevices();
     }
 
     _setupPollTimer();
@@ -117,8 +135,19 @@ class HomeViewModel extends ChangeNotifier {
   void _handleWebSocketMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString();
     final targetDeviceId = message['deviceId']?.toString();
-    if (type == 'EMERGENCY_UNLOCK' && targetDeviceId != null) {
+    if (type == 'EMERGENCY_UNLOCK' && targetDeviceId != null && _isHistoryActive) {
       fetchDeviceLogs(targetDeviceId);
+    }
+
+    if (type == 'DEVICES_UPDATE' && message['devices'] is List) {
+      final rawList = message['devices'] as List;
+      final newDevices = rawList.map((json) => DeviceModel.fromJson(json)).toList();
+      _cacheManager.saveCachedDevices(rawList);
+      final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+      _devices = updatedDevices;
+      _loading = false;
+      notifyListeners();
+      return;
     }
 
     const stateEvents = {
@@ -162,9 +191,20 @@ class HomeViewModel extends ChangeNotifier {
     } else {
       _fetchDevicesSilent();
     }
+
+    // Only update history logs if user is actively viewing the History tab
+    if (_isHistoryActive) {
+      fetchDeviceLogs(targetUpper);
+    }
   }
 
   Future<void> _fetchDevicesSilent() async {
+    final hasToken = await _storage.hasToken();
+    if (!hasToken) {
+      reset();
+      return;
+    }
+
     try {
       final devicesData = await _api.getDevices();
       _failedPollAttempts = 0;
@@ -190,8 +230,7 @@ class HomeViewModel extends ChangeNotifier {
     } catch (e) {
       final errLower = e.toString().toLowerCase();
       if (errLower.contains('401') || errLower.contains('unauthorized')) {
-        _connectionIssue = ConnectionIssue.sessionExpired;
-        notifyListeners();
+        reset();
         return;
       }
       _failedPollAttempts++;
@@ -227,9 +266,8 @@ class HomeViewModel extends ChangeNotifier {
       _loading = false;
       notifyListeners();
 
-      if (_devices.isNotEmpty) {
-        final devId = _selectedDeviceId ?? _devices.first.deviceId;
-        fetchDeviceLogs(devId);
+      if (_devices.isNotEmpty && _selectedDeviceId == null) {
+        _selectedDeviceId = _devices.first.deviceId;
       }
     } catch (e) {
       _error = e.toString();
@@ -240,7 +278,7 @@ class HomeViewModel extends ChangeNotifier {
       _devices = _devices.map((d) => d.copyWith(online: false)).toList();
       final errLower = e.toString().toLowerCase();
       if (errLower.contains('401') || errLower.contains('unauthorized')) {
-        _connectionIssue = ConnectionIssue.sessionExpired;
+        _connectionIssue = ConnectionIssue.none;
         notifyListeners();
       } else {
         notifyListeners();
@@ -314,10 +352,12 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _api.unlockDevice(deviceId);
+      if (_ws.isConnected) {
+        await _ws.sendUnlockCommand(deviceId);
+      } else {
+        await _api.unlockDevice(deviceId);
+      }
       Future.delayed(const Duration(milliseconds: 600), () => fetchDeviceLogs(deviceId));
-      Future.delayed(const Duration(milliseconds: 1500), () => _fetchDevicesSilent());
-      Future.delayed(const Duration(seconds: 4), () => _fetchDevicesSilent());
     } catch (e) {
       _recentlyUnlockedUntil.remove(targetUpper);
       _error = e.toString();
@@ -331,27 +371,83 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchDeviceLogs(String deviceId) async {
+  Future<void> fetchDeviceLogs(String deviceId, {bool refresh = true}) async {
     _selectedDeviceId = deviceId;
     if (_isFetchingLogs) return;
     _isFetchingLogs = true;
+    if (refresh) {
+      _hasMoreLogs = true;
+      _nextLogsCursor = null;
+    }
+    if (_logs.isEmpty) {
+      notifyListeners();
+    }
 
     try {
-      final logsData = await _api.getDeviceLogs(deviceId);
-      _logs = logsData.map((json) => LogModel.fromJson(json)).toList();
-      _ws.joinRoom(deviceId);
-      notifyListeners();
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final response = await _api.getDeviceLogs(
+        deviceId,
+        todayStart: todayStart,
+        limit: 15,
+      );
+      final rawLogs = (response['logs'] as List<dynamic>?) ??
+          (response['data'] as List<dynamic>?) ??
+          [];
+      _logs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
+      final hasMoreRaw = response['hasMore'];
+      _hasMoreLogs = hasMoreRaw is bool ? hasMoreRaw : false;
+      final cursorRaw = response['nextCursor'];
+      _nextLogsCursor = cursorRaw != null ? DateTime.tryParse(cursorRaw.toString()) : null;
 
-      await _cacheManager.saveCachedLogs(deviceId, logsData);
+      _ws.joinRoom(deviceId);
+
+      if (rawLogs.isNotEmpty) {
+        await _cacheManager.saveCachedLogs(deviceId, rawLogs);
+      }
     } catch (e) {
       _error = e.toString();
       final cached = await _cacheManager.loadCachedLogs(deviceId);
       if (cached.isNotEmpty) {
         _logs = cached;
       }
-      notifyListeners();
     } finally {
       _isFetchingLogs = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchMoreLogs() async {
+    if (_isLoadingMoreLogs || !_hasMoreLogs || _selectedDeviceId == null || _nextLogsCursor == null) {
+      return;
+    }
+    _isLoadingMoreLogs = true;
+    notifyListeners();
+
+    try {
+      final response = await _api.getDeviceLogs(
+        _selectedDeviceId!,
+        before: _nextLogsCursor,
+        limit: 15,
+      );
+      final rawLogs = (response['logs'] as List<dynamic>?) ??
+          (response['data'] as List<dynamic>?) ??
+          [];
+      final newLogs = rawLogs.map((json) => LogModel.fromJson(json as Map<String, dynamic>)).toList();
+
+      final existingIds = _logs.map((l) => l.id).toSet();
+      final uniqueNewLogs = newLogs.where((l) => !existingIds.contains(l.id)).toList();
+      _logs.addAll(uniqueNewLogs);
+
+      final hasMoreRaw = response['hasMore'];
+      _hasMoreLogs = hasMoreRaw is bool ? hasMoreRaw : false;
+      final cursorRaw = response['nextCursor'];
+      _nextLogsCursor = cursorRaw != null ? DateTime.tryParse(cursorRaw.toString()) : null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoadingMoreLogs = false;
+      notifyListeners();
     }
   }
 
@@ -412,6 +508,21 @@ class HomeViewModel extends ChangeNotifier {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void reset() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _isInitialized = false;
+    _devices = [];
+    _logs = [];
+    _selectedDeviceId = null;
+    _nextLogsCursor = null;
+    _hasMoreLogs = true;
+    _isLoadingMoreLogs = false;
+    _connectionIssue = ConnectionIssue.none;
+    _ws.disconnect();
     notifyListeners();
   }
 

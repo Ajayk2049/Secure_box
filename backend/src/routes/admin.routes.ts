@@ -1,5 +1,14 @@
 import { FastifyInstance } from "fastify";
 import { adminMiddleware } from "../middlewares/admin.middleware.js";
+import { validateBody } from "../middlewares/validate.middleware.js";
+import {
+  createDeviceForUserSchema,
+  updateDeviceSlotsSchema,
+  createCustomerSchema,
+  updateRequestStatusSchema,
+  updateSlotPricingSchema,
+  slotRequestActionSchema,
+} from "../schemas/admin.schemas.js";
 import {
   getAllDevices,
   getAllUsers,
@@ -33,6 +42,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/admin/devices", {
+    preHandler: [validateBody(createDeviceForUserSchema)],
     handler: createDeviceForUser,
   });
 
@@ -41,6 +51,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/admin/devices/:id/slots", {
+    preHandler: [validateBody(updateDeviceSlotsSchema)],
     handler: updateDeviceSlots,
   });
 
@@ -53,6 +64,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/admin/users", {
+    preHandler: [validateBody(createCustomerSchema)],
     handler: createCustomer,
   });
 
@@ -66,6 +78,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/admin/requests/:id/status", {
+    preHandler: [validateBody(updateRequestStatusSchema)],
     handler: updateRequestStatus,
   });
 
@@ -84,6 +97,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/admin/pricing/slots", {
+    preHandler: [validateBody(updateSlotPricingSchema)],
     handler: updateSlotPricing,
   });
 
@@ -93,14 +107,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.patch("/admin/slot-requests/:id/approve", {
+    preHandler: [validateBody(slotRequestActionSchema)],
     handler: approveSlotRequest,
   });
 
   fastify.patch("/admin/slot-requests/:id/reject", {
+    preHandler: [validateBody(slotRequestActionSchema)],
     handler: rejectSlotRequest,
   });
 
   fastify.patch("/admin/slot-requests/:id/revoke", {
+    preHandler: [validateBody(slotRequestActionSchema)],
     handler: revokeSlotRequest,
   });
 }

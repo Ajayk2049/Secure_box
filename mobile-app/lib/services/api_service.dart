@@ -3,7 +3,7 @@ import 'package:dio/dio.dart';
 import '../config.dart';
 import 'api_error_handler.dart';
 import 'secure_storage.dart';
-import 'websocket_service.dart';
+import 'token_refresh_manager.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -22,6 +22,9 @@ class ApiService {
 
   final SecureStorage _storage = SecureStorage();
 
+  /// Refreshes the access token using TokenRefreshManager.
+  Future<String?> refreshToken() => TokenRefreshManager().refreshToken();
+
   Future<Dio> get authDio async {
     final token = await _storage.getToken();
     final dio = Dio(BaseOptions(
@@ -38,49 +41,27 @@ class ApiService {
       InterceptorsWrapper(
         onError: (DioException error, ErrorInterceptorHandler handler) async {
           if (error.response?.statusCode == 401 && !error.requestOptions.path.contains('/auth/refresh')) {
-            try {
-              final refreshToken = await _storage.getRefreshToken();
-              if (refreshToken != null && refreshToken.isNotEmpty) {
-                // Call /api/auth/refresh to rotate tokens
-                final refreshRes = await _client.post('/api/auth/refresh', data: {
-                  'refreshToken': refreshToken,
-                });
-
-                if (refreshRes.statusCode == 200 && refreshRes.data['token'] != null) {
-                  final newToken = refreshRes.data['token'];
-                  final newRefreshToken = refreshRes.data['refreshToken'];
-
-                  await _storage.saveToken(newToken);
-                  if (newRefreshToken != null) {
-                    await _storage.saveRefreshToken(newRefreshToken);
-                  }
-
-                  // Immediately reconnect WebSocket with the rotated access token
-                  WebSocketService().reconnectWithNewToken(newToken);
-
-                  // Retry the original failed request with the new access token
-                  final opts = error.requestOptions;
-                  opts.headers['Authorization'] = 'Bearer $newToken';
-                  final cloneReq = await dio.request(
-                    opts.path,
-                    options: Options(
-                      method: opts.method,
-                      headers: opts.headers,
-                    ),
-                    data: opts.data,
-                    queryParameters: opts.queryParameters,
-                  );
-                  return handler.resolve(cloneReq);
+            final newToken = await TokenRefreshManager().refreshToken();
+            if (newToken != null && newToken.isNotEmpty) {
+              final opts = error.requestOptions;
+              opts.headers['Authorization'] = 'Bearer $newToken';
+              try {
+                final cloneReq = await dio.request(
+                  opts.path,
+                  options: Options(
+                    method: opts.method,
+                    headers: opts.headers,
+                  ),
+                  data: opts.data,
+                  queryParameters: opts.queryParameters,
+                );
+                return handler.resolve(cloneReq);
+              } catch (retryErr) {
+                if (retryErr is DioException) {
+                  return handler.next(retryErr);
                 }
               }
-            } catch (_) {
-              // Token refresh failed or revoked
             }
-
-            // Both access and refresh tokens are invalid or expired
-            await _storage.deleteToken();
-            await _storage.deleteRefreshToken();
-            onSessionExpired.add("Your session has expired. Please sign in again.");
           }
           return handler.next(error);
         },
@@ -122,11 +103,42 @@ class ApiService {
     }
   }
 
-  // 2. Register with OTP (+ optional Join Code)
+  // 1b. Check If Email Exists
+  Future<Map<String, dynamic>> checkEmail(String email) async {
+    try {
+      final response = await _client.post('/api/auth/check-email', data: {
+        'email': email,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to check email'));
+    }
+  }
+
+  // 1c. Check If Phone Exists
+  Future<Map<String, dynamic>> checkPhone(String phone) async {
+    try {
+      final response = await _client.post('/api/auth/check-phone', data: {
+        'phone': phone,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to check phone'));
+    }
+  }
+
+  // 2. Register with OTP (+ optional Join Code & Email)
   Future<Map<String, dynamic>> registerWithOtp({
     required String phone,
     required String otp,
     required String password,
+    String? email,
     String? name,
     String? inviteCode,
   }) async {
@@ -135,6 +147,7 @@ class ApiService {
         'phone': phone,
         'otp': otp,
         'password': password,
+        if (email != null && email.isNotEmpty) 'email': email,
         if (name != null && name.isNotEmpty) 'name': name,
         if (inviteCode != null && inviteCode.isNotEmpty) 'inviteCode': inviteCode,
       });
@@ -180,6 +193,25 @@ class ApiService {
     } catch (_) {}
   }
 
+  // 3d. Place / Request Smart Locker Order
+  Future<Map<String, dynamic>> placeOrder({
+    required String address,
+    String? pincode,
+    int units = 1,
+  }) async {
+    try {
+      final dio = await authDio;
+      final response = await dio.post('/api/auth/order', data: {
+        'address': address.trim(),
+        if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
+        'units': units,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      throw Exception(extractErrorMessage(e, 'Failed to place locker order'));
+    }
+  }
+
   // 4. Device Management
   Future<List<dynamic>> getDevices() async {
     try {
@@ -216,11 +248,27 @@ class ApiService {
     }
   }
 
-  Future<List<dynamic>> getDeviceLogs(String deviceId) async {
+  Future<Map<String, dynamic>> getDeviceLogs(
+    String deviceId, {
+    DateTime? todayStart,
+    DateTime? before,
+    int limit = 15,
+  }) async {
     try {
       final dio = await authDio;
-      final response = await dio.get('/api/devices/$deviceId/logs');
-      return response.data['logs'];
+      final queryParams = <String, dynamic>{
+        'limit': limit,
+        if (todayStart != null) 'todayStart': todayStart.toUtc().toIso8601String(),
+        if (before != null) 'before': before.toUtc().toIso8601String(),
+      };
+      final response = await dio.get(
+        '/api/devices/$deviceId/logs',
+        queryParameters: queryParams,
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return {'logs': response.data?['logs'] ?? [], 'hasMore': false};
     } on DioException catch (e) {
       throw Exception(extractErrorMessage(e, 'Failed to load device logs'));
     }
@@ -333,6 +381,13 @@ class ApiService {
     } on DioException catch (e) {
       throw Exception(extractErrorMessage(e, 'Failed to submit slot upgrade request'));
     }
+  }
+
+  static Future<void> updateFcmToken(String fcmToken) async {
+    try {
+      final dio = await ApiService().authDio;
+      await dio.post('/api/user/fcm-token', data: {'fcmToken': fcmToken});
+    } catch (_) {}
   }
 }
 

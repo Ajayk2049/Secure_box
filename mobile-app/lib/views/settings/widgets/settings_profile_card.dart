@@ -5,16 +5,20 @@ class SettingsProfileCard extends StatelessWidget {
   final String userName;
   final String userPhone;
   final String accountScopeText;
+  final String? avatarEmoji;
 
   const SettingsProfileCard({
     super.key,
     required this.userName,
     required this.userPhone,
     required this.accountScopeText,
+    this.avatarEmoji,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasEmoji = avatarEmoji != null && avatarEmoji!.isNotEmpty;
+
     return LiquidParcelCard(
       useStaticGlass: true,
       borderRadius: 22,
@@ -34,14 +38,19 @@ class SettingsProfileCard extends StatelessWidget {
               ),
             ),
             child: Center(
-              child: Text(
-                userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
-                style: const TextStyle(
-                  color: ParcelGlassColors.accentBlue,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                ),
-              ),
+              child: hasEmoji
+                  ? Text(
+                      avatarEmoji!,
+                      style: const TextStyle(fontSize: 22),
+                    )
+                  : Text(
+                      userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+                      style: const TextStyle(
+                        color: ParcelGlassColors.accentBlue,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                      ),
+                    ),
             ),
           ),
           const SizedBox(width: 14),

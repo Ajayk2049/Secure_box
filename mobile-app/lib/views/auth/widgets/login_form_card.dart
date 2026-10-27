@@ -37,6 +37,7 @@ class _LoginFormCardState extends State<LoginFormCard> {
     if (!mounted) return;
 
     if (success) {
+      widget.auth.clearError();
       widget.onLoginSuccess();
     } else {
       final errText = widget.auth.error ?? 'Invalid mobile number/email or password';
@@ -77,16 +78,18 @@ class _LoginFormCardState extends State<LoginFormCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'SIGN IN',
-            style: TextStyle(
-              color: primaryTextColor,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.2,
+          Center(
+            child: Text(
+              'SIGN IN',
+              style: TextStyle(
+                color: primaryTextColor,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.5,
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
           if (widget.auth.error != null) ...[
             Container(
@@ -120,24 +123,14 @@ class _LoginFormCardState extends State<LoginFormCard> {
           ],
 
           // Mobile / Email input
-          Text(
-            'MOBILE NUMBER OR EMAIL',
-            style: TextStyle(
-              color: secondaryTextColor,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.0,
-            ),
-          ),
-          const SizedBox(height: 6),
           TextField(
             controller: widget.identifierController,
             keyboardType: TextInputType.text,
             style: TextStyle(color: primaryTextColor, fontSize: 14, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
-              hintText: 'e.g. 9876543210 or name@domain.com',
+              hintText: 'Mobile number / Email',
               hintStyle: TextStyle(
-                color: secondaryTextColor.withValues(alpha: 0.5),
+                color: secondaryTextColor.withValues(alpha: 0.6),
                 fontSize: 13,
               ),
               filled: true,
@@ -162,24 +155,14 @@ class _LoginFormCardState extends State<LoginFormCard> {
           const SizedBox(height: 16),
 
           // Password input
-          Text(
-            'PASSWORD',
-            style: TextStyle(
-              color: secondaryTextColor,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.0,
-            ),
-          ),
-          const SizedBox(height: 6),
           TextField(
             controller: widget.passwordController,
             obscureText: _obscurePassword,
             style: TextStyle(color: primaryTextColor, fontSize: 14, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
-              hintText: '••••••••',
+              hintText: 'Password',
               hintStyle: TextStyle(
-                color: secondaryTextColor.withValues(alpha: 0.5),
+                color: secondaryTextColor.withValues(alpha: 0.6),
                 fontSize: 13,
               ),
               filled: true,
@@ -235,11 +218,11 @@ class _LoginFormCardState extends State<LoginFormCard> {
                       ),
                     )
                   : const Text(
-                      'UNLOCK ACCESS',
+                      'Sign In',
                       style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
                       ),
                     ),
             ),

@@ -8,14 +8,14 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
   for (const path of wsPaths) {
     fastify.get(path, { websocket: true }, async (socket, request) => {
       const query = request.query as { deviceId?: string; deviceKey?: string } | undefined;
-      const headerKey = request.headers["x-device-key"] as string | undefined;
+      const headerKey = (request.headers["x-device-key"] || request.headers["x-api-key"]) as string | undefined;
 
       let deviceId = (query?.deviceId || "").trim().toUpperCase();
-      let deviceKey = (query?.deviceKey || headerKey || "").trim();
+      let deviceKey = (headerKey || query?.deviceKey || "").trim();
 
       let authenticated = false;
 
-      // 1. Initial authentication check via URL query parameters
+      // 1. Initial authentication check (via header or query param)
       if (deviceId && deviceKey) {
         const authResult = await deviceSocketService.authenticateDevice(deviceId, deviceKey);
         if (authResult.authorized) {
@@ -28,9 +28,25 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
         }
       }
 
+      // Per-socket message rate limiting (Availability Hardening: max 30 msg/5s)
+      let messageCount = 0;
+      let windowStart = Date.now();
+
       // 2. Incoming message handler
       socket.on("message", async (rawMessage) => {
         try {
+          const now = Date.now();
+          if (now - windowStart > 5000) {
+            messageCount = 0;
+            windowStart = now;
+          }
+          messageCount++;
+          if (messageCount > 30) {
+            fastify.log.warn({ deviceId }, "[DEVICE-WS] Message flood detected from device socket. Disconnecting.");
+            socket.close(4429, "Too Many Messages");
+            return;
+          }
+
           const data = JSON.parse(rawMessage.toString());
 
           // Handle late auth handshake if not provided in URL
@@ -90,10 +106,23 @@ export async function deviceWsRoute(fastify: FastifyInstance) {
         }
       });
 
-      // 3. Disconnection handler
+      // 3. Native WebSocket ping & pong protocol frame listeners (RFC 6455)
+      socket.on("ping", () => {
+        if (authenticated && deviceId) {
+          deviceSocketService.recordPong(deviceId);
+        }
+      });
+
+      socket.on("pong", () => {
+        if (authenticated && deviceId) {
+          deviceSocketService.recordPong(deviceId);
+        }
+      });
+
+      // 4. Disconnection handler
       socket.on("close", () => {
         if (authenticated && deviceId) {
-          deviceSocketService.handleDisconnect(deviceId).catch(() => {});
+          deviceSocketService.handleDisconnect(deviceId, socket).catch(() => {});
         }
       });
 

@@ -59,9 +59,18 @@ class WebSocketService {
               if (message['type'] == 'PONG') return;
               if (message['type'] == 'ERROR') {
                 final err = message['error']?.toString().toLowerCase() ?? '';
-                if (err.contains('expired') || err.contains('unauthorized')) {
-                  ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-                  disconnect();
+                // Only authentication/token errors should trigger token recovery
+                if (err.contains('token expired') || err.contains('invalid token') || err.contains('token required')) {
+                  _handleExpiredTokenAndReconnect();
+                  return;
+                }
+                // Device-level room authorization errors should not expire the user session
+                if (err.contains('unauthorized to monitor device') || err.contains('not found')) {
+                  for (final room in _joinedRooms.toList()) {
+                    if (err.contains(room.toLowerCase())) {
+                      _joinedRooms.remove(room);
+                    }
+                  }
                   return;
                 }
               }
@@ -76,10 +85,9 @@ class WebSocketService {
         onDone: () {
           final code = _channel?.closeCode;
           final reason = _channel?.closeReason;
-          if (code == 4401 || (reason != null && reason.toLowerCase().contains('expired'))) {
-            debugPrint('WebSocket closed due to expired token (code: $code, reason: $reason)');
-            ApiService.onSessionExpired.add("Your session has expired. Please sign in again.");
-            disconnect();
+          if (code == 4401 || (reason != null && (reason.toLowerCase().contains('expired') || reason.toLowerCase().contains('token')))) {
+            debugPrint('WebSocket closed due to expired token (code: $code, reason: $reason). Attempting token refresh...');
+            _handleExpiredTokenAndReconnect();
             return;
           }
           _handleDisconnect();
@@ -130,7 +138,7 @@ class WebSocketService {
   }
 
   Future<void> reconnectWithNewToken([String? freshToken]) async {
-    disconnect();
+    disconnect(clearRooms: true);
     if (freshToken != null && freshToken.isNotEmpty) {
       await _storage.saveToken(freshToken);
     }
@@ -151,7 +159,69 @@ class WebSocketService {
     }
   }
 
-  void disconnect() {
+  /// Sends an instant unlock command over the active WebSocket connection.
+  Future<Map<String, dynamic>> sendUnlockCommand(String deviceId, [int durationMs = 3000]) async {
+    final clean = deviceId.trim().toUpperCase();
+    if (!_isConnected || _channel == null) {
+      throw Exception('WebSocket not connected');
+    }
+
+    final completer = Completer<Map<String, dynamic>>();
+
+    StreamSubscription? sub;
+    Timer? timeoutTimer;
+
+    timeoutTimer = Timer(const Duration(seconds: 8), () {
+      sub?.cancel();
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('Unlock request timed out'));
+      }
+    });
+
+    sub = stream.listen((msg) {
+      if (msg['type'] == 'UNLOCK_ACK' && (msg['deviceId']?.toString().toUpperCase() == clean)) {
+        timeoutTimer?.cancel();
+        sub?.cancel();
+        if (!completer.isCompleted) {
+          if (msg['success'] == true) {
+            completer.complete(msg);
+          } else {
+            completer.completeError(Exception(msg['error'] ?? 'Unlock command rejected'));
+          }
+        }
+      }
+    });
+
+    try {
+      _channel?.sink.add(jsonEncode({
+        'type': 'UNLOCK_DEVICE',
+        'deviceId': clean,
+        'duration': durationMs,
+      }));
+    } catch (e) {
+      timeoutTimer.cancel();
+      sub.cancel();
+      if (!completer.isCompleted) {
+        completer.completeError(e);
+      }
+    }
+
+    return completer.future;
+  }
+
+  /// Requests fresh live device statuses over WebSocket without HTTP polling.
+  void requestDevices() {
+    if (_isConnected && _channel != null) {
+      try {
+        _channel?.sink.add(jsonEncode({'type': 'GET_DEVICES'}));
+      } catch (_) {}
+    }
+  }
+
+  void disconnect({bool clearRooms = false}) {
+    if (clearRooms) {
+      _joinedRooms.clear();
+    }
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _pingTimer?.cancel();
@@ -164,8 +234,38 @@ class WebSocketService {
     _channel = null;
   }
 
+  bool _isRefreshingToken = false;
+
+  Future<void> _handleExpiredTokenAndReconnect() async {
+    if (_isRefreshingToken) return;
+    _isRefreshingToken = true;
+
+    try {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _pingTimer?.cancel();
+      _pingTimer = null;
+      _isConnected = false;
+      _isConnecting = false;
+      try {
+        _channel?.sink.close();
+      } catch (_) {}
+      _channel = null;
+
+      final newToken = await ApiService().refreshToken();
+      if (newToken != null && newToken.isNotEmpty) {
+        debugPrint('WebSocket: Token refreshed successfully. Reconnecting WebSocket...');
+        connect();
+      } else {
+        debugPrint('WebSocket: Token refresh failed or session truly expired.');
+      }
+    } finally {
+      _isRefreshingToken = false;
+    }
+  }
+
   void dispose() {
-    disconnect();
+    disconnect(clearRooms: true);
     _controller.close();
   }
 }

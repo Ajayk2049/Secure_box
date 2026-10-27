@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import '../glass_theme.dart';
 
 class DeviceCodeTabView extends StatelessWidget {
@@ -112,40 +111,44 @@ class DeviceCodeTabView extends StatelessWidget {
           ),
         ),
 
-        const Spacer(),
+        const SizedBox(height: 18),
 
-        // Link Locker Liquid Glass Button
-        LiquidGlassButton(
-          label: 'LINK LOCKER',
-          icon: Icons.link_rounded,
-          height: 48,
+        // Link Locker Action Button
+        SizedBox(
           width: double.infinity,
-          foregroundColor: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 13.5,
-          style: LiquidGlassButton.defaultStyle.copyWith(
-            shape: const LiquidGlassShape.continuousRoundedRectangle(
-              cornerRadius: 14,
-              borderWidth: 1.2,
-              borderColor: Color(0x80FFFFFF),
+          height: 48,
+          child: ElevatedButton(
+            onPressed: isSubmitting ? null : onSubmit,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ParcelGlassColors.navyTitle,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              elevation: 0,
             ),
-            appearance: LiquidGlassAppearance(
-              color: ParcelGlassColors.accentBlue.withValues(alpha: 0.88),
-              blur: const LiquidGlassBlur(sigmaX: 12, sigmaY: 12),
-            ),
-            refraction: const LiquidGlassRefraction(
-              distortion: 0.12,
-              distortionWidth: 20,
-            ),
+            child: isSubmitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.link_rounded, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'LINK LOCKER',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
           ),
-          onPressed: isSubmitting ? null : onSubmit,
-          child: isSubmitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                )
-              : null,
         ),
       ],
     );

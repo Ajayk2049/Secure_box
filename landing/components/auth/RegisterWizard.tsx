@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ShippingLabelHeader } from "./ShippingLabelHeader";
 import { CompanyFooter } from "./CompanyFooter";
+import { getApiUrl } from "@/lib/api";
 
 interface RegisterWizardProps {
   step: number;
@@ -35,7 +36,7 @@ interface RegisterWizardProps {
   loading: boolean;
   onSendOtp: () => void;
   onSubmit: (e: React.FormEvent) => void;
-  onSwitchToLogin: () => void;
+  onSwitchToLogin: (prefill?: string) => void;
 }
 
 export function RegisterWizard({
@@ -63,6 +64,73 @@ export function RegisterWizard({
 }: RegisterWizardProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [emailExists, setEmailExists] = useState(false);
+  const [emailFormatError, setEmailFormatError] = useState<string | null>(null);
+  const [phoneExists, setPhoneExists] = useState(false);
+
+  const validateEmailFormat = (val: string): boolean => {
+    const clean = val.trim();
+    if (!clean) {
+      setEmailFormatError(null);
+      return true;
+    }
+    const isValid = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(clean);
+    if (!isValid) {
+      setEmailFormatError("Please enter a valid email address (e.g. name@example.com)");
+      return false;
+    }
+    setEmailFormatError(null);
+    return true;
+  };
+
+  const checkEmailAvailability = async (emailVal: string): Promise<boolean> => {
+    const clean = emailVal.trim().toLowerCase();
+    if (!clean) {
+      setEmailExists(false);
+      setEmailFormatError(null);
+      return false;
+    }
+    if (!validateEmailFormat(clean)) {
+      setEmailExists(false);
+      return false;
+    }
+    try {
+      const res = await fetch(`${getApiUrl()}/auth/check-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: clean }),
+      });
+      const data = await res.json();
+      const exists = Boolean(data.exists);
+      setEmailExists(exists);
+      return exists;
+    } catch {
+      setEmailExists(false);
+      return false;
+    }
+  };
+
+  const checkPhoneAvailability = async (phoneVal: string): Promise<boolean> => {
+    const clean = phoneVal.replace(/\D/g, "");
+    if (clean.length !== 10) {
+      setPhoneExists(false);
+      return false;
+    }
+    try {
+      const res = await fetch(`${getApiUrl()}/auth/check-phone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: clean }),
+      });
+      const data = await res.json();
+      const exists = Boolean(data.exists);
+      setPhoneExists(exists);
+      return exists;
+    } catch {
+      setPhoneExists(false);
+      return false;
+    }
+  };
 
   const stepTitles: Record<number, { title: string; sub: string }> = {
     1: { title: "Step 1: Recipient", sub: "Enter your contact details" },
@@ -81,7 +149,7 @@ export function RegisterWizard({
       <div className="flex border border-[#3D2310]/30 bg-zinc-100 font-mono text-[10px] uppercase font-black tracking-wider mt-1 mb-2">
         <button
           type="button"
-          onClick={onSwitchToLogin}
+          onClick={() => onSwitchToLogin()}
           className="flex-1 py-1 text-[#3D2310] hover:bg-zinc-200 cursor-pointer text-center transition-colors"
         >
           Sign In
@@ -123,14 +191,60 @@ export function RegisterWizard({
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   disabled={loading}
                   value={email}
-                  onChange={(e) => onEmailChange(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    onEmailChange(val);
+                    if (emailExists) setEmailExists(false);
+                    if (emailFormatError) {
+                      if (!val.trim() || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(val.trim())) {
+                        setEmailFormatError(null);
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    if (email.trim()) {
+                      if (validateEmailFormat(email)) {
+                        checkEmailAvailability(email);
+                      }
+                    } else {
+                      setEmailFormatError(null);
+                      setEmailExists(false);
+                    }
+                  }}
                   placeholder="name@example.com"
-                  className="w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono"
+                  className={`w-full bg-white border-2 ${
+                    emailFormatError ? "border-rose-500" : "border-[#3D2310]/30"
+                  } pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono`}
                 />
               </div>
+              {emailFormatError && (
+                <div className="bg-rose-50 border border-rose-300 p-2 text-left space-y-1 mt-1.5">
+                  <p className="text-[11px] text-rose-800 font-sans font-medium leading-tight">
+                    {emailFormatError}
+                  </p>
+                </div>
+              )}
+              {emailExists && (
+                <div className="bg-amber-50 border border-amber-300 p-2 text-left space-y-1 mt-1.5">
+                  <p className="text-[11px] text-amber-900 font-sans font-medium leading-tight">
+                    An account with this email already exists.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchToLogin(email)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#3D2310] text-[#FAF9F5] text-[10px] font-mono font-bold uppercase hover:bg-[#2B1810] cursor-pointer"
+                  >
+                    <span>Sign In Instead</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -151,20 +265,48 @@ export function RegisterWizard({
                     required
                     disabled={loading}
                     value={phone}
-                    onChange={(e) => onPhoneChange(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "");
+                      onPhoneChange(val);
+                      if (val.length === 10) {
+                        checkPhoneAvailability(val);
+                      } else if (phoneExists) {
+                        setPhoneExists(false);
+                      }
+                    }}
                     placeholder="9876543210"
                     className="w-full bg-white border-2 border-[#3D2310]/30 pl-9 pr-3 py-2 text-xs text-[#3D2310] placeholder-zinc-400 focus:outline-none focus:border-[#3D2310] font-mono"
                   />
                 </div>
                 <button
                   type="button"
-                  disabled={loading || otpCooldown > 0 || phone.length !== 10}
-                  onClick={onSendOtp}
+                  disabled={loading || otpCooldown > 0 || phone.length !== 10 || phoneExists}
+                  onClick={async () => {
+                    if (phoneExists) return;
+                    const exists = await checkPhoneAvailability(phone);
+                    if (exists) return;
+                    onSendOtp();
+                  }}
                   className="px-3 py-2 bg-[#3D2310] text-[#FAF9F5] hover:bg-[#2B1810] text-[10px] font-mono font-bold uppercase shrink-0 transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {otpCooldown > 0 ? `${otpCooldown}s` : "Get OTP"}
                 </button>
               </div>
+              {phoneExists && (
+                <div className="bg-amber-50 border border-amber-300 p-2 text-left space-y-1 mt-1.5">
+                  <p className="text-[11px] text-amber-900 font-sans font-medium leading-tight">
+                    An account with this mobile number already exists.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchToLogin(phone)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#3D2310] text-[#FAF9F5] text-[10px] font-mono font-bold uppercase hover:bg-[#2B1810] cursor-pointer"
+                  >
+                    <span>Sign In Instead</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -293,13 +435,20 @@ export function RegisterWizard({
           {step < 3 ? (
             <button
               type="button"
-              disabled={loading}
+              disabled={
+                loading ||
+                (step === 1 && (!name.trim() || emailExists || Boolean(emailFormatError) || (email.trim().length > 0 && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email.trim())))) ||
+                (step === 2 && (!phone || phone.length !== 10 || !otp || phoneExists))
+              }
               onClick={() => {
-                if (step === 1 && !name.trim()) return;
-                if (step === 2 && (!phone || phone.length !== 10 || !otp)) return;
+                if (step === 1) {
+                  if (!name.trim() || emailExists) return;
+                  if (email.trim().length > 0 && !validateEmailFormat(email)) return;
+                }
+                if (step === 2 && (!phone || phone.length !== 10 || !otp || phoneExists)) return;
                 onSetStep(step + 1);
               }}
-              className="px-4 py-2 bg-[#3D2310] hover:bg-[#2B1810] text-[#FAF9F5] text-xs font-mono font-bold uppercase flex items-center gap-1 ml-auto cursor-pointer"
+              className="px-4 py-2 bg-[#3D2310] hover:bg-[#2B1810] text-[#FAF9F5] text-xs font-mono font-bold uppercase flex items-center gap-1 ml-auto cursor-pointer disabled:opacity-50"
             >
               <span>Next</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -330,7 +479,7 @@ export function RegisterWizard({
             Already registered?{" "}
             <button
               type="button"
-              onClick={onSwitchToLogin}
+              onClick={() => onSwitchToLogin()}
               className="font-black text-[#3D2310] underline underline-offset-2 hover:text-[#2B1810] ml-1 cursor-pointer"
             >
               Sign In to existing account

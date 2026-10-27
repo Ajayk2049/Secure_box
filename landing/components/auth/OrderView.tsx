@@ -14,15 +14,15 @@ interface OrderViewProps {
 }
 
 export function OrderView({
-  apiUrl,
   currentUser,
   onOrderComplete,
   onCancel,
 }: OrderViewProps) {
-  const [orderStep, setOrderStep] = useState<number>(1);
-  const [orderAddress, setOrderAddress] = useState(currentUser?.address || "");
-  const [orderPincode, setOrderPincode] = useState(currentUser?.pincode || "");
-  const [orderUnits, setOrderUnits] = useState<number>(1);
+  const [houseNo, setHouseNo] = useState("");
+  const [streetAddress, setStreetAddress] = useState(currentUser?.address || "");
+  const [landmark, setLandmark] = useState("");
+  const [pincode, setPincode] = useState(currentUser?.pincode || "");
+  const [units, setUnits] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -36,24 +36,39 @@ export function OrderView({
     e.preventDefault();
     clearMessages();
 
-    if (!orderAddress.trim()) {
-      setErrorMessage("Please enter your doorstep installation address");
+    if (!houseNo.trim()) {
+      setErrorMessage("Please enter your house or flat number");
       return;
     }
-    const cleanPin = orderPincode.replace(/\D/g, "");
-    if (!cleanPin || cleanPin.length !== 6 || !cleanPin.startsWith("56")) {
-      setErrorMessage("PIN code must be a 6-digit Bengaluru PIN code (starting with 56)");
+
+    if (!streetAddress.trim()) {
+      setErrorMessage("Please enter your street or area address");
       return;
     }
+
+    const cleanPin = pincode.replace(/\D/g, "");
+    if (!cleanPin || cleanPin.length !== 6) {
+      setErrorMessage("Please enter a valid 6-digit PIN code");
+      return;
+    }
+
+    // Build the complete doorstep delivery address (identical to mobile app format)
+    const fullAddress = [
+      houseNo.trim(),
+      streetAddress.trim(),
+      landmark.trim() ? `Landmark: ${landmark.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
 
     setLoading(true);
     try {
       const res = await userFetch("/auth/order", {
         method: "POST",
         body: JSON.stringify({
-          address: orderAddress.trim(),
+          address: fullAddress,
           pincode: cleanPin,
-          units: orderUnits || 1,
+          units: units || 1,
         }),
       });
 
@@ -70,9 +85,9 @@ export function OrderView({
         name: data.user?.name || currentUser?.name || "Customer",
         phone: data.user?.phone || currentUser?.phone,
         email: data.user?.email || currentUser?.email,
-        address: data.user?.address || orderAddress,
+        address: data.user?.address || fullAddress,
         pincode: data.user?.pincode || cleanPin,
-        units: data.user?.units || orderUnits,
+        units: data.user?.units || units,
         orderStatus: data.user?.orderStatus || "pending",
         assignedDevices: data.user?.assignedDevices || currentUser?.assignedDevices || [],
       };
@@ -89,9 +104,9 @@ export function OrderView({
   return (
     <div className="flex-1 flex flex-col items-center justify-center w-full h-full font-sans p-1 sm:p-2 relative">
       {errorMessage && (
-        <div className="absolute top-2 left-4 right-4 z-40 bg-rose-50 border border-rose-600/30 text-rose-800 p-2 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span className="truncate">{errorMessage}</span>
+        <div className="absolute top-2 left-4 right-4 z-40 bg-rose-50 border border-rose-600/30 text-rose-800 p-2 text-xs flex items-start gap-2 shadow-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span className="leading-snug">{errorMessage}</span>
         </div>
       )}
 
@@ -103,17 +118,22 @@ export function OrderView({
       )}
 
       <OrderWizard
-        step={orderStep}
-        onSetStep={setOrderStep}
-        address={orderAddress}
-        onAddressChange={setOrderAddress}
-        pincode={orderPincode}
-        onPincodeChange={setOrderPincode}
-        units={orderUnits}
-        onUnitsChange={setOrderUnits}
+        recipientName={currentUser?.name || "Customer"}
+        recipientPhone={currentUser?.phone}
+        houseNo={houseNo}
+        onHouseNoChange={setHouseNo}
+        streetAddress={streetAddress}
+        onStreetAddressChange={setStreetAddress}
+        landmark={landmark}
+        onLandmarkChange={setLandmark}
+        pincode={pincode}
+        onPincodeChange={setPincode}
+        units={units}
+        onUnitsChange={setUnits}
         loading={loading}
         onSubmit={handleOrderSubmit}
         onCancel={onCancel}
+        onGpsError={(err) => setErrorMessage(err)}
       />
     </div>
   );

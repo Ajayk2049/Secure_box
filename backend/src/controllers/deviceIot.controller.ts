@@ -6,97 +6,38 @@ import { User } from "../models/User.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
 import { deviceSocketService } from "../services/deviceSocket.service.js";
+import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 export { checkDeviceWatchdog } from "../services/deviceWatchdog.service.js";
 
-// 1. Diagnostics endpoint for bench testing: POST /api/test/unlock
-export async function testUnlockDevice(request: FastifyRequest, reply: FastifyReply) {
-  const { deviceId } = request.body as { deviceId?: string };
+export { testUnlockDevice } from "./testDiagnostics.controller.js";
 
-  if (!deviceId) {
-    return reply.status(400).send({ error: "deviceId is required in JSON body" });
+async function findAndSelectDevice(targetId: string) {
+  let device: any = await Device.findOne({ deviceId: targetId }).select("+deviceKeyHash +deviceKey");
+  if (!device && process.env.NODE_ENV !== "production") {
+    const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${escaped}$`, "i") } }).select("+deviceKeyHash +deviceKey");
   }
-
-  const cleanDeviceId = deviceId.trim().toUpperCase();
-  let device = await Device.findOne({ deviceId: cleanDeviceId });
-  if (!device) {
-    if (process.env.NODE_ENV !== "production") {
-      device = await Device.create({
-        deviceId: cleanDeviceId,
-        name: `Test Unit ${cleanDeviceId}`,
-        doorState: "closed",
-        online: true,
-        deviceKey: `sbx_live_${crypto.randomBytes(16).toString("hex")}`,
-      });
-    } else {
-      return reply.status(404).send({ error: `Device '${cleanDeviceId}' not found` });
-    }
-  }
-
-  const enqueued = commandQueueService.enqueueCommand(cleanDeviceId, "unlock");
-
-  // Push directly via WebSocket if hardware is connected in bench testing
-  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(cleanDeviceId, enqueued.commandId, 3000);
-
-  await Log.create({
-    deviceId: device._id,
-    action: "test_unlock_command",
-    metadata: {
-      source: isDirectlyPushed ? "test_endpoint_websocket_direct" : "test_endpoint",
-      commandId: enqueued.commandId,
-    },
-  });
-
-  wsService.broadcastToDevice(cleanDeviceId, {
-    type: "UNLOCK_COMMAND",
-    deviceId: cleanDeviceId,
-    commandId: enqueued.commandId,
-  });
-
-  return reply.send({
-    success: true,
-    message: isDirectlyPushed
-      ? `Bench unlock command dispatched in real-time to ${cleanDeviceId}`
-      : `Bench unlock command enqueued for ${cleanDeviceId}`,
-    commandId: enqueued.commandId,
-    device: {
-      deviceId: cleanDeviceId,
-      name: device.name,
-      online: device.online,
-    },
-  });
+  return device;
 }
 
 function isDeviceAuthorized(device: any, request: FastifyRequest): boolean {
   const providedKey = (request.headers["x-device-key"] as string | undefined)?.trim();
-
-  // In non-production environments, allow dev requests and auto-provision missing device keys if DEMO_MODE is true
-  if (process.env.NODE_ENV !== "production") {
-    if (process.env.DEMO_MODE === "true" || providedKey === "SIMULATOR_TEST_KEY") {
-      if (!device.deviceKey) {
-        device.deviceKey = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
-        device.save().catch(() => {});
-      }
-      return true;
+  if (process.env.NODE_ENV !== "production" && (process.env.DEMO_MODE === "true" || providedKey === "SIMULATOR_TEST_KEY")) {
+    if (!device.deviceKeyHash && !device.deviceKey) {
+      device.deviceKeyHash = hashDeviceKey(`sbx_live_${crypto.randomBytes(16).toString("hex")}`);
+      device.save().catch(() => {});
     }
+    return true;
   }
-
-  if (!device.deviceKey) {
-    return false;
+  if (!providedKey) return false;
+  const authCheck = verifyDeviceKey(providedKey, device.deviceKeyHash, device.deviceKey);
+  if (!authCheck.valid) return false;
+  if (authCheck.needsMigration) {
+    device.deviceKeyHash = hashDeviceKey(providedKey);
+    device.deviceKey = undefined;
+    device.save().catch(() => {});
   }
-
-  // Device key must strictly be passed in HTTP headers (never in URL query string or body)
-  if (!providedKey || typeof providedKey !== "string") {
-    return false;
-  }
-
-  const providedBuffer = Buffer.from(providedKey);
-  const actualBuffer = Buffer.from(device.deviceKey.trim());
-
-  if (providedBuffer.length !== actualBuffer.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(providedBuffer, actualBuffer);
+  return true;
 }
 
 // 2. Short-polling: GET /api/device/command?deviceId=BOX_001
@@ -104,24 +45,11 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
   const query = request.query as { deviceId?: string };
   const headerDeviceId = request.headers["x-device-id"] as string | undefined;
   const targetId = (query.deviceId || headerDeviceId || "").trim().toUpperCase();
+  if (!targetId) return reply.status(400).send({ error: "deviceId query parameter or x-device-id header is required" });
 
-  if (!targetId) {
-    return reply.status(400).send({ error: "deviceId query parameter or x-device-id header is required" });
-  }
-
-  let device = await Device.findOne({ deviceId: targetId });
-  if (!device && process.env.NODE_ENV !== "production") {
-    const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${escaped}$`, "i") } });
-  }
-
-  if (!device) {
-    return reply.status(404).send({ error: `Device '${targetId}' not registered` });
-  }
-
-  if (!isDeviceAuthorized(device, request)) {
-    return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
-  }
+  const device = await findAndSelectDevice(targetId);
+  if (!device) return reply.status(404).send({ error: `Device '${targetId}' not registered` });
+  if (!isDeviceAuthorized(device, request)) return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
 
   const wasOffline = !device.online;
   const now = Date.now();
@@ -135,20 +63,9 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
 
   if (wasOffline) {
     const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
-    const statusMsg = {
-      type: "DEVICE_STATUS",
-      deviceId: targetId,
-      doorState: device.doorState,
-      doorStatus: device.doorState === "closed" ? "locked" : "unlocked",
-      online: true,
-    };
-    wsService.broadcastToDeviceGroup(targets, statusMsg);
-
-    const onlineMsg = {
-      type: "DEVICE_ONLINE",
-      deviceId: targetId,
-    };
-    wsService.broadcastToDeviceGroup(targets, onlineMsg);
+    const doorStatus = device.doorState === "closed" ? "locked" : "unlocked";
+    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_STATUS", deviceId: targetId, doorState: device.doorState, doorStatus, online: true });
+    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_ONLINE", deviceId: targetId });
   }
 
   const pending = commandQueueService.popPendingCommand(targetId);
@@ -211,19 +128,9 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
     });
   }
 
-  let device = await Device.findOne({ deviceId: targetId });
-  if (!device && process.env.NODE_ENV !== "production") {
-    const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    device = await Device.findOne({ deviceId: { $regex: new RegExp(`^${escaped}$`, "i") } });
-  }
-
-  if (!device) {
-    return reply.status(404).send({ error: `Device '${targetId}' not registered` });
-  }
-
-  if (!isDeviceAuthorized(device, request)) {
-    return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
-  }
+  const device = await findAndSelectDevice(targetId);
+  if (!device) return reply.status(404).send({ error: `Device '${targetId}' not registered` });
+  if (!isDeviceAuthorized(device, request)) return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
 
   device.doorState = normalizedDoorState;
   device.online = true;
@@ -320,18 +227,10 @@ export async function receiveHeartbeat(request: FastifyRequest, reply: FastifyRe
   const headerDeviceId = request.headers["x-device-id"] as string | undefined;
   const targetId = (body.deviceId || headerDeviceId || "").trim().toUpperCase();
 
-  if (!targetId) {
-    return reply.status(400).send({ error: "deviceId is required" });
-  }
-
-  const device = await Device.findOne({ deviceId: targetId });
-  if (!device) {
-    return reply.status(404).send({ error: `Device '${targetId}' not registered` });
-  }
-
-  if (!isDeviceAuthorized(device, request)) {
-    return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
-  }
+  if (!targetId) return reply.status(400).send({ error: "deviceId is required" });
+  const device = await findAndSelectDevice(targetId);
+  if (!device) return reply.status(404).send({ error: `Device '${targetId}' not registered` });
+  if (!isDeviceAuthorized(device, request)) return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
 
   device.online = true;
   device.lastHeartbeat = new Date();

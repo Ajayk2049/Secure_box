@@ -150,8 +150,8 @@ class LiquidParcelCard extends StatelessWidget {
   }
 }
 
-/// Ultra-smooth popup dialog with liquid glass aesthetics, zero shader recompilation jitter,
-/// and smooth scale + fade entrance.
+/// Hardware-accelerated popup dialog with Flutter's default smooth platform transition (DialogRoute)
+/// and authentic frosted glass aesthetics suited for all devices (including low- and mid-range GPUs).
 Future<T?> showParcelGlassDialog<T>({
   required BuildContext context,
   required Widget child,
@@ -160,74 +160,86 @@ Future<T?> showParcelGlassDialog<T>({
   double cornerRadius = 28,
   bool barrierDismissible = true,
 }) {
-  return showGeneralDialog<T>(
+  return showDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
-    barrierLabel: 'Dismiss',
-    barrierColor: Colors.black.withValues(alpha: 0.25),
-    transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (ctx, anim1, anim2) {
-      return Center(
-        child: Material(
-          type: MaterialType.transparency,
-          child: Container(
-            width: width,
-            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(cornerRadius),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF3D2310).withValues(alpha: 0.22),
-                  blurRadius: 36,
-                  offset: const Offset(0, 16),
-                ),
-                BoxShadow(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(cornerRadius),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(cornerRadius),
-                    color: Colors.white.withValues(alpha: 0.40),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.70),
-                      width: 1.5,
+    barrierColor: Colors.black.withValues(alpha: 0.38),
+    builder: (dialogContext) {
+      final mediaQuery = MediaQuery.of(dialogContext);
+      final keyboardBottom = mediaQuery.viewInsets.bottom;
+      final viewPadding = mediaQuery.viewPadding;
+      final verticalPadding = padding is EdgeInsets ? padding.vertical : 40.0;
+      final availableContentHeight = (mediaQuery.size.height -
+              keyboardBottom -
+              viewPadding.top -
+              viewPadding.bottom -
+              verticalPadding -
+              24)
+          .clamp(140.0, double.infinity);
+
+      return AnimatedPadding(
+        padding: EdgeInsets.only(bottom: keyboardBottom),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: Center(
+          child: RepaintBoundary(
+            child: Material(
+              type: MaterialType.transparency,
+              child: Container(
+                width: width,
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(cornerRadius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF3D2310).withValues(alpha: 0.16),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
                     ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.55),
-                        Colors.white.withValues(alpha: 0.28),
-                      ],
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      blurRadius: 8,
+                      offset: const Offset(0, -1),
                     ),
-                  ),
-                  child: Padding(
-                    padding: padding,
-                    child: child,
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(cornerRadius),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                    child: Container(
+                      padding: padding,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(cornerRadius),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.70),
+                          width: 1.2,
+                        ),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.40),
+                            Colors.white.withValues(alpha: 0.20),
+                          ],
+                        ),
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: availableContentHeight,
+                        ),
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          child: child,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      );
-    },
-
-    transitionBuilder: (ctx, anim, secondaryAnim, dialogChild) {
-      final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
-      return FadeTransition(
-        opacity: curved,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
-          child: dialogChild,
         ),
       );
     },

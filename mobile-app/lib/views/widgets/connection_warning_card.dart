@@ -31,13 +31,16 @@ class _ConnectionWarningCardState extends State<ConnectionWarningCard> {
   }
 
   void _handleReauth() {
+    context.read<HomeViewModel>().reset();
     context.read<AuthViewModel>().logout();
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.issue == ConnectionIssue.none) return const SizedBox.shrink();
+    if (widget.issue == ConnectionIssue.none || widget.issue == ConnectionIssue.sessionExpired) {
+      return const SizedBox.shrink();
+    }
 
     final isSessionExpired = widget.issue == ConnectionIssue.sessionExpired;
     final isNoInternet = widget.issue == ConnectionIssue.noInternet;

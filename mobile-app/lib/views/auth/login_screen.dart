@@ -22,9 +22,14 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        final auth = context.read<AuthViewModel>();
-        if (auth.savedIdentifier != null && auth.savedIdentifier!.isNotEmpty) {
-          _identifierController.text = auth.savedIdentifier!;
+        final args = ModalRoute.of(context)?.settings.arguments;
+        if (args is String && args.isNotEmpty) {
+          _identifierController.text = args;
+        } else {
+          final auth = context.read<AuthViewModel>();
+          if (auth.savedIdentifier != null && auth.savedIdentifier!.isNotEmpty) {
+            _identifierController.text = auth.savedIdentifier!;
+          }
         }
       }
     });

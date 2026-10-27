@@ -10,6 +10,7 @@ import {
   deviceTelemetrySchema,
   deviceHeartbeatSchema,
 } from "../schemas/device.schemas.js";
+import { User } from "../models/User.model.js";
 import {
   getDevices,
   createDevice,
@@ -18,8 +19,8 @@ import {
   updateDeviceName,
 } from "../controllers/device.controller.js";
 
+import { testUnlockDevice } from "../controllers/testDiagnostics.controller.js";
 import {
-  testUnlockDevice,
   getDeviceCommand,
   receiveTelemetry,
   receiveHeartbeat,
@@ -155,6 +156,20 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
       },
       preHandler: [validateBody(joinDeviceSchema)],
       handler: joinDevice,
+    });
+
+    authScope.post("/user/fcm-token", async (req, reply) => {
+      const userId = (req as any).user?.id;
+      const { fcmToken } = (req.body as any) || {};
+      if (!userId || !fcmToken || typeof fcmToken !== "string") {
+        return reply.status(400).send({ error: "fcmToken string is required" });
+      }
+
+      await User.findByIdAndUpdate(userId, {
+        $addToSet: { fcmTokens: fcmToken.trim() },
+      });
+
+      return reply.send({ success: true, message: "FCM token registered" });
     });
   });
 }

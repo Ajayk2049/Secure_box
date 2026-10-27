@@ -10,7 +10,10 @@ export interface IDevice extends Document {
   doorState: "open" | "closed";
   online: boolean;
   lastHeartbeat?: Date;
+  lastConnectedAt?: Date;
+  lastDisconnectedAt?: Date;
   deviceKey?: string;
+  deviceKeyHash?: string;
   inviteCode?: string;
   inviteExpiresAt?: Date;
   createdAt: Date;
@@ -66,9 +69,24 @@ const deviceSchema = new Schema<IDevice>(
       type: Date,
       default: null,
     },
+    lastConnectedAt: {
+      type: Date,
+      default: null,
+    },
+    lastDisconnectedAt: {
+      type: Date,
+      default: null,
+    },
+    deviceKeyHash: {
+      type: String,
+      trim: true,
+      select: false,
+      index: true,
+    },
     deviceKey: {
       type: String,
       trim: true,
+      select: false,
     },
     inviteCode: {
       type: String,

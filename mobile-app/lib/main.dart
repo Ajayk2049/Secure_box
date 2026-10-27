@@ -13,11 +13,20 @@ import 'views/home/home_screen.dart';
 import 'views/home/history_screen.dart';
 import 'views/widgets/glass_theme.dart';
 
+import 'services/notification_service.dart';
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await AppConfig.init();
+  try {
+    await AppConfig.init();
+  } catch (_) {}
   try {
     await LiquidGlassShaders.ensureLoaded();
+  } catch (_) {}
+  try {
+    await NotificationService().initialize();
   } catch (_) {}
 
   runApp(const SecureBoxApp());
@@ -35,6 +44,7 @@ class SecureBoxApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => WebSocketViewModel()),
       ],
       child: MaterialApp(
+        navigatorKey: appNavigatorKey,
         title: 'Secure Box',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.light,

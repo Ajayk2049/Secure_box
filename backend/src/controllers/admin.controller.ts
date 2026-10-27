@@ -1,10 +1,12 @@
+import mongoose from "mongoose";
 import { hashPassword } from "../utils/password.js";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { Device } from "../models/Device.model.js";
 import { User } from "../models/User.model.js";
 import { Log } from "../models/Log.model.js";
 import { smsService } from "../services/sms.service.js";
-import { generateDeviceKey } from "./adminRequests.controller.js";
+import { deviceStatusService } from "../services/deviceStatus.service.js";
+import { generateDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 // 1. Create a customer manually from admin
 export async function createCustomer(request: FastifyRequest, reply: FastifyReply) {
@@ -47,17 +49,23 @@ export async function createCustomer(request: FastifyRequest, reply: FastifyRepl
   return reply.status(201).send({ success: true, user: userObj });
 }
 
-// 2. Get all devices with slot capacity calculations
+// 2. Get all devices with slot capacity calculations (Keys strictly excluded)
 export async function getAllDevices(request: FastifyRequest, reply: FastifyReply) {
   const devices = await Device.find()
+    .select("-deviceKey -deviceKeyHash")
     .populate("ownerId", "phone email name role")
     .populate("coOwners", "phone email name");
 
   const devicesWithSlotStats = devices.map((dev) => {
+    const devObj = dev.toObject();
+    delete (devObj as any).deviceKey;
+    delete (devObj as any).deviceKeyHash;
     const allowed = dev.allowedSlots || 2;
     const occupied = 1 + (dev.coOwners ? dev.coOwners.length : 0);
+    const isOnline = deviceStatusService.resolveDeviceOnline(dev.deviceId, dev.online, dev.lastHeartbeat);
     return {
-      ...dev.toObject(),
+      ...devObj,
+      online: isOnline,
       totalCapacity: 5,
       allowedSlots: allowed,
       lockedSlots: 5 - allowed,
@@ -77,19 +85,8 @@ export async function getAllUsers(request: FastifyRequest, reply: FastifyReply) 
 
 // 4. System statistics
 export async function getSystemStats(request: FastifyRequest, reply: FastifyReply) {
-  const totalDevices = await Device.countDocuments();
-  const onlineDevices = await Device.countDocuments({ online: true });
-  const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
-  const totalLogs = await Log.countDocuments();
-
-  return reply.send({
-    stats: {
-      totalDevices,
-      onlineDevices,
-      totalUsers,
-      totalLogs,
-    },
-  });
+  const stats = await deviceStatusService.getSystemLiveStats();
+  return reply.send({ stats });
 }
 
 // 5. Update device slot limits
@@ -162,6 +159,7 @@ export async function createDeviceForUser(request: FastifyRequest, reply: Fastif
     return reply.status(404).send({ error: "Owner user not found" });
   }
 
+  const rawKey = generateDeviceKey();
   const device = await Device.create({
     deviceId: cleanDeviceId,
     name: name.trim(),
@@ -171,73 +169,68 @@ export async function createDeviceForUser(request: FastifyRequest, reply: Fastif
     doorState: "closed",
     online: false,
     lastHeartbeat: null,
-    deviceKey: generateDeviceKey(),
+    deviceKeyHash: hashDeviceKey(rawKey),
   });
+
+  const devObj = device.toObject();
+  delete (devObj as any).deviceKeyHash;
 
   return reply.status(201).send({
     success: true,
     message: `Device ${cleanDeviceId} successfully assigned to ${owner.name || owner.email}`,
-    device,
+    device: {
+      ...devObj,
+      deviceKey: rawKey, // Show-once on creation response
+    },
   });
 }
 
 // 7. Delete device
 export async function deleteDevice(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
-  const device = await Device.findByIdAndDelete(id);
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
+  const query = mongoose.isValidObjectId(id) ? { _id: id } : { deviceId: id };
+  const device = await Device.findOneAndDelete(query);
+  if (!device) return reply.status(404).send({ error: "Device not found" });
   await Log.deleteMany({ deviceId: device._id });
   return reply.send({ success: true, message: `Device ${device.deviceId} deleted successfully` });
 }
 
 // 8. System & Device Logs
 export async function getSystemLogs(request: FastifyRequest, reply: FastifyReply) {
-  const logs = await Log.find()
-    .populate("deviceId", "deviceId name")
-    .sort({ timestamp: -1 })
-    .limit(200);
-
+  const logs = await Log.find().populate("deviceId", "deviceId name").sort({ timestamp: -1 }).limit(200);
   return reply.send({ logs });
 }
 
 export async function getDeviceLogsForAdmin(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
-  const logs = await Log.find({ deviceId: id })
-    .sort({ timestamp: -1 })
-    .limit(100);
-
+  const query = mongoose.isValidObjectId(id) ? { deviceId: id } : { deviceId: id };
+  const logs = await Log.find(query).sort({ timestamp: -1 }).limit(100);
   return reply.send({ logs });
 }
 
-// 9. Rotate device hardware key from Admin Dashboard
+// 9. Rotate device hardware key from Admin Dashboard (Show-Once Secret)
 export async function rotateDeviceKey(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
-
-  const device = await Device.findById(id);
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
+  const query = mongoose.isValidObjectId(id) ? { _id: id } : { deviceId: id };
+  const device = await Device.findOne(query);
+  if (!device) return reply.status(404).send({ error: "Device not found" });
 
   const newKey = generateDeviceKey();
-  device.deviceKey = newKey;
+  device.deviceKeyHash = hashDeviceKey(newKey);
+  device.deviceKey = undefined; // purge legacy plaintext if present
   await device.save();
 
   await Log.create({
     deviceId: device._id,
     action: "unlock",
     status: "success",
-    metadata: {
-      action: "admin_key_rotation",
-      rotatedBy: (request.user as { id: string })?.id,
-    },
+    metadata: { action: "admin_key_rotation", rotatedBy: (request.user as { id: string })?.id },
   });
 
   return reply.send({
     success: true,
     message: `Hardware key for device ${device.deviceId} rotated successfully`,
     deviceId: device.deviceId,
-    deviceKey: newKey,
+    deviceKey: newKey, // Show-once on rotation response
   });
 }

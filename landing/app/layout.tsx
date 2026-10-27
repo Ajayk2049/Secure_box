@@ -21,6 +21,13 @@ const merriweather = Merriweather({
 export const metadata: Metadata = {
   title: "Secure Box - Smart. Secure. Delivered.",
   description: "Premium wall-mounted parcel delivery box for secure residential contactless delivery.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({

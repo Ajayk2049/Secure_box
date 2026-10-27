@@ -9,11 +9,15 @@ export const checkPhoneSchema = z.object({
   phone: z.string().min(1, "Mobile number is required"),
 });
 
+export const checkEmailSchema = z.object({
+  email: z.string().email("Please enter a valid email address (e.g. name@example.com)"),
+});
+
 export const registerWithOtpSchema = z.object({
   phone: z.string().min(1, "Mobile number is required"),
   otp: z.string().min(4, "OTP must be at least 4 digits"),
   password: z.string().min(6, "Password must be at least 6 characters long").max(12, "Password must not exceed 12 characters"),
-  email: z.string().email("Invalid email format").optional(),
+  email: z.string().email("Please enter a valid email address (e.g. name@example.com)").optional(),
   name: z.string().optional(),
   inviteCode: z.string().optional(),
   address: z.string().optional(),
@@ -29,7 +33,7 @@ export const loginSchema = z.object({
 });
 
 export const refreshTokenSchema = z.object({
-  refreshToken: z.string().min(1, "Refresh token is required"),
+  refreshToken: z.string().min(1, "Refresh token is required").optional(),
 });
 
 export const logoutSchema = z.object({
@@ -44,7 +48,7 @@ export const placeOrderSchema = z.object({
 
 export const updateProfileSchema = z.object({
   name: z.string().min(1, "Name cannot be empty").optional(),
-  email: z.string().email("Invalid email format").optional().or(z.literal("")),
+  email: z.string().email("Please enter a valid email address (e.g. name@example.com)").optional().or(z.literal("")),
 });
 
 export const resetPasswordSchema = z.object({

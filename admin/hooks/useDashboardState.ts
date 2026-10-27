@@ -6,6 +6,7 @@ import { SlotRequestItem } from "../components/dashboard/SlotRequestsTable";
 import { MainDashboardTab, PendingSubFilter } from "../components/dashboard/DashboardHeader";
 import { SlotPricingData } from "../components/modals/PricingModal";
 import { adminFetch } from "@/lib/api";
+import { adminWs } from "@/lib/websocket";
 
 interface UseDashboardStateProps {
   onLogout?: () => void;
@@ -89,8 +90,8 @@ export function useDashboardState({ onLogout }: UseDashboardStateProps = {}) {
   const loadRequests = useCallback(
     async (silent = false) => {
       if (!silent) setIsLoading(true);
-      const token = localStorage.getItem("admin_token");
-      if (!token) {
+      const user = localStorage.getItem("admin_user");
+      if (!user) {
         if (!silent) setIsLoading(false);
         return;
       }
@@ -98,8 +99,6 @@ export function useDashboardState({ onLogout }: UseDashboardStateProps = {}) {
       try {
         const res = await adminFetch("/admin/requests");
         if (res.status === 401 || res.status === 403) {
-          localStorage.removeItem("admin_token");
-          localStorage.removeItem("admin_refresh_token");
           localStorage.removeItem("admin_user");
           if (onLogout) onLogout();
           return;
@@ -140,10 +139,59 @@ export function useDashboardState({ onLogout }: UseDashboardStateProps = {}) {
 
   useEffect(() => {
     loadRequests(false);
-    const interval = setInterval(() => {
-      loadRequests(true);
-    }, 4000);
-    return () => clearInterval(interval);
+
+    const unsubscribe = adminWs.subscribe((msg) => {
+      if (!msg || !msg.type) return;
+
+      if (
+        msg.type === "DEVICE_STATUS" ||
+        msg.type === "DEVICE_ONLINE" ||
+        msg.type === "DEVICE_OFFLINE"
+      ) {
+        const targetId = (msg.deviceId || "").toUpperCase();
+        if (!targetId) return;
+
+        const isOnline =
+          msg.type === "DEVICE_ONLINE"
+            ? true
+            : msg.type === "DEVICE_OFFLINE"
+            ? false
+            : Boolean(msg.online);
+
+        setRequests((prev) =>
+          prev.map((req) => {
+            const hasDevice = (req.assignedDeviceIds || []).some(
+              (id) => id.toUpperCase() === targetId
+            );
+            if (!hasDevice) return req;
+
+            const updatedAssigned = (req.assignedDevicesInfo || []).map((dev) => {
+              if (dev.deviceId.toUpperCase() === targetId) {
+                return {
+                  ...dev,
+                  online: isOnline,
+                  doorState: msg.doorState || dev.doorState,
+                  lastHeartbeat: msg.timestamp || new Date().toISOString(),
+                };
+              }
+              return dev;
+            });
+
+            const isDeviceOnline = updatedAssigned.some((d) => d.online);
+
+            return {
+              ...req,
+              assignedDevicesInfo: updatedAssigned,
+              isDeviceOnline,
+            };
+          })
+        );
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [loadRequests]);
 
   const handleSavePricing = async (monthly: number, yearly: number) => {

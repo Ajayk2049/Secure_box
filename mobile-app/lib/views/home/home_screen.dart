@@ -1,14 +1,14 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/device.model.dart';
-import '../../services/api_service.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import '../settings/settings_screen.dart';
+import '../settings/widgets/edit_profile_modal.dart';
 import '../widgets/add_locker_dialog.dart';
 import '../widgets/connection_warning_card.dart';
 import '../widgets/glass_theme.dart';
+import '../widgets/order_locker_modal.dart';
 import 'widgets/co_owner_invite_sheet.dart';
 import 'widgets/home_bottom_nav.dart';
 import 'widgets/home_empty_state.dart';
@@ -26,42 +26,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0; // 0: Home, 1: History, 2: Settings
   String? _unlockingDeviceId;
-  StreamSubscription<String>? _sessionExpirySub;
-
   @override
   void initState() {
     super.initState();
-    _sessionExpirySub = ApiService.onSessionExpired.stream.listen((message) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.lock_clock_rounded, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  message.isNotEmpty ? message : 'Session expired. Please sign in again.',
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: ParcelGlassColors.alertRed,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          action: SnackBarAction(
-            label: 'Sign In',
-            textColor: Colors.white,
-            onPressed: () {
-              context.read<AuthViewModel>().logout();
-              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-            },
-          ),
-        ),
-      );
-    });
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().init();
     });
@@ -69,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _sessionExpirySub?.cancel();
     super.dispose();
   }
 
@@ -89,8 +55,28 @@ class _HomeScreenState extends State<HomeScreen> {
     AddLockerDialog.show(context);
   }
 
+  void _showOrderLocker(BuildContext context) {
+    if (context.read<HomeViewModel>().isOffline) {
+      _showOfflineWarning(context);
+      return;
+    }
+    OrderLockerModal.show(context);
+  }
+
   void _showInviteSheet(BuildContext context, String deviceId, String deviceName) {
     CoOwnerInviteSheet.show(context, deviceId, deviceName);
+  }
+
+  void _showOfflineWarning(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('This action is unavailable while the server is offline.'),
+        backgroundColor: ParcelGlassColors.alertRed,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
   }
 
   Future<void> _handleUnlock(DeviceModel device) async {
@@ -102,6 +88,29 @@ class _HomeScreenState extends State<HomeScreen> {
             homeVM.isCheckingReachability
                 ? 'Connecting to server. Please wait a moment...'
                 : 'Unlock unavailable: Server is currently offline or unreachable.',
+          ),
+          backgroundColor: ParcelGlassColors.alertRed,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      );
+      return;
+    }
+
+    if (!device.online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${device.name.isNotEmpty ? device.name : device.deviceId} is currently offline. Unlock unavailable.',
+                ),
+              ),
+            ],
           ),
           backgroundColor: ParcelGlassColors.alertRed,
           behavior: SnackBarBehavior.floating,
@@ -135,9 +144,27 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final rawMsg = e.toString().replaceAll('Exception: ', '').trim();
+        final isOffline = rawMsg.toLowerCase().contains('offline');
+        final errorText = isOffline
+            ? '${device.name.isNotEmpty ? device.name : device.deviceId} is offline. Please check device power and connection.'
+            : (rawMsg.isNotEmpty ? rawMsg : 'Unlock failed. Please try again.');
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Unlock failed: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Row(
+              children: [
+                Icon(
+                  isOffline ? Icons.cloud_off_rounded : Icons.error_outline_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(errorText),
+                ),
+              ],
+            ),
             backgroundColor: ParcelGlassColors.alertRed,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
@@ -162,7 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 RepaintBoundary(child: _buildHomeTab()),
                 const RepaintBoundary(child: HomeHistoryTab()),
                 RepaintBoundary(
-                  child: SettingsScreen(onBackToHome: () => setState(() => _currentTab = 0)),
+                  child: SettingsScreen(onBackToHome: () {
+                    setState(() => _currentTab = 0);
+                    context.read<HomeViewModel>().setHistoryActive(false);
+                  }),
                 ),
               ],
             ),
@@ -175,10 +205,21 @@ class _HomeScreenState extends State<HomeScreen> {
               child: HomeBottomNav(
                 selectedIndex: _currentTab,
                 onChanged: (index) {
-                  if (_currentTab == index) return;
+                  final homeVM = context.read<HomeViewModel>();
+                  if (_currentTab == index) {
+                    if (index == 1) {
+                      homeVM.setHistoryActive(true);
+                      final devId = homeVM.selectedDevice?.deviceId ??
+                          (homeVM.devices.isNotEmpty ? homeVM.devices.first.deviceId : null);
+                      if (devId != null) {
+                        homeVM.fetchDeviceLogs(devId);
+                      }
+                    }
+                    return;
+                  }
                   setState(() => _currentTab = index);
+                  homeVM.setHistoryActive(index == 1);
                   if (index == 1) {
-                    final homeVM = context.read<HomeViewModel>();
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!mounted) return;
                       final devId = homeVM.selectedDevice?.deviceId ??
@@ -225,9 +266,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         HomeUserGreeting(
                           userName: userName,
+                          avatarEmoji: authVM.avatarEmoji,
                           showAddButton: false,
                           isOffline: homeVM.isOffline,
                           onAddLocker: () => _showAddLocker(context),
+                          onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                         ),
                         if (homeVM.isOffline) ...[
                           const SizedBox(height: 16),
@@ -239,6 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       loading: homeVM.loading,
                       isOffline: homeVM.isOffline,
                       onAddLocker: () => _showAddLocker(context),
+                      onOrderLocker: () => _showOrderLocker(context),
                     ),
                     const SizedBox(height: 10),
                   ],
@@ -264,9 +308,11 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 HomeUserGreeting(
                   userName: userName,
+                  avatarEmoji: authVM.avatarEmoji,
                   showAddButton: true,
                   isOffline: homeVM.isOffline,
                   onAddLocker: () => _showAddLocker(context),
+                  onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                 ),
                 const SizedBox(height: 16),
                 if (homeVM.isOffline) ...[

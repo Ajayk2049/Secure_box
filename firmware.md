@@ -350,7 +350,7 @@ void manageRelayTimer() {
 1. **Boot & Handshake**: Open Serial Monitor at **115200 baud**. You should see:
    ```text
    [WIFI] Connected! IP Address: 192.168.1.xxx | RSSI: -54 dBm
-   [WS] Connected to ws://192.168.1.100:4300/ws/device ✅
+   [WS] Connected to ws://192.168.1.100:7000/ws/device ✅
    [AUTH] Device authenticated successfully with backend.
    [WS] TX -> TELEMETRY: Door is closed
    ```

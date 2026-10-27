@@ -5,6 +5,7 @@ import '../../widgets/glass_theme.dart';
 class RegisterCredentialsStep extends StatelessWidget {
   final TextEditingController otpController;
   final TextEditingController nameController;
+  final TextEditingController? emailController;
   final TextEditingController passwordController;
   final TextEditingController inviteCodeController;
   final AuthViewModel auth;
@@ -14,6 +15,7 @@ class RegisterCredentialsStep extends StatelessWidget {
     super.key,
     required this.otpController,
     required this.nameController,
+    this.emailController,
     required this.passwordController,
     required this.inviteCodeController,
     required this.auth,
@@ -93,6 +95,68 @@ class RegisterCredentialsStep extends StatelessWidget {
             ),
           ),
         ),
+
+        const SizedBox(height: 16),
+        Text(
+          'EMAIL ADDRESS (OPTIONAL)',
+          style: TextStyle(
+            color: secondaryTextColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 6),
+        if (emailController != null)
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: emailController!,
+            builder: (context, value, _) {
+              final text = value.text.trim();
+              final isInvalid = text.isNotEmpty &&
+                  !RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$').hasMatch(text);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: TextStyle(color: primaryTextColor, fontSize: 14, fontWeight: FontWeight.w600),
+                    decoration: InputDecoration(
+                      hintText: 'name@example.com',
+                      hintStyle: TextStyle(color: secondaryTextColor.withValues(alpha: 0.5)),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.65),
+                      prefixIcon: Icon(Icons.email_outlined, color: secondaryTextColor, size: 18),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: isInvalid
+                            ? const BorderSide(color: ParcelGlassColors.alertRose, width: 1.5)
+                            : const BorderSide(color: Colors.black12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                          color: isInvalid ? ParcelGlassColors.alertRose : ParcelGlassColors.mintSignal,
+                          width: 1.8,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (isInvalid) ...[
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Please enter a valid email address (e.g. name@example.com)',
+                      style: TextStyle(
+                        color: ParcelGlassColors.alertRose,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
 
         const SizedBox(height: 16),
         Text(

@@ -17,7 +17,9 @@ export interface ILog extends Document {
     | "order_requested"
     | "order_approved"
     | "order_rejected"
-    | "user_signup";
+    | "user_signup"
+    | "device_online"
+    | "device_offline";
   timestamp: Date;
   metadata?: Record<string, unknown>;
 }

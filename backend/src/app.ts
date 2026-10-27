@@ -2,8 +2,11 @@ import Fastify from "fastify";
 import mongoose from "mongoose";
 import { config } from "./config.js";
 import { checkDeviceWatchdog } from "./services/deviceWatchdog.service.js";
+import { deviceNotificationService } from "./services/deviceNotification.service.js";
 import { wsService } from "./services/websocket.service.js";
+import { deviceStatusService } from "./services/deviceStatus.service.js";
 import { User } from "./models/User.model.js";
+import { Device } from "./models/Device.model.js";
 import { loggerConfig, loggerStream, isSilentTerminalPath, logFilePath, pruneLogsOlderThan24Hours } from "./logger.js";
 import { AppError, ValidationError } from "./errors/AppError.js";
 
@@ -13,6 +16,7 @@ import helmetPlugin from "./plugins/helmet.plugin.js";
 import websocketPlugin from "./plugins/websocket.plugin.js";
 import rateLimitPlugin from "./plugins/rateLimit.plugin.js";
 import mongoSanitizePlugin from "./plugins/mongoSanitize.plugin.js";
+import cookiePlugin from "./plugins/cookie.plugin.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import deviceRoutes from "./routes/device.routes.js";
@@ -21,7 +25,7 @@ import { deviceWsRoute } from "./routes/deviceWs.route.js";
 import { simulatorHtml } from "./simulator.html.js";
 
 const fastify = Fastify({
-  trustProxy: true,
+  trustProxy: config.trustProxy,
   logger: {
     ...loggerConfig,
     stream: loggerStream,
@@ -30,7 +34,7 @@ const fastify = Fastify({
 });
 
 function sanitizeLogUrl(url: string): string {
-  return url.replace(/([?&](?:token|adminToken)=)[^&]+/gi, "$1[REDACTED]");
+  return url.replace(/([?&](?:token|adminToken|deviceKey|key|apiKey|secret)=)[^&]+/gi, "$1[REDACTED]");
 }
 
 // Custom clean request and error hooks
@@ -57,6 +61,11 @@ function redactSensitiveData(data: any): any {
     "token",
     "refreshtoken",
     "devicekey",
+    "device_key",
+    "apikey",
+    "api_key",
+    "privatekey",
+    "private_key",
     "secret",
     "authorization",
     "admin_initial_password",
@@ -125,6 +134,7 @@ async function bootstrap() {
   await fastify.register(helmetPlugin);
   await fastify.register(rateLimitPlugin);
   await fastify.register(mongoSanitizePlugin);
+  await fastify.register(cookiePlugin);
   await fastify.register(jwtPlugin);
   await fastify.register(websocketPlugin);
 
@@ -162,7 +172,8 @@ async function bootstrap() {
   // Virtual ESP32 Hardware Simulator GUI (Protected: disabled in production unless admin authenticated)
   fastify.get("/simulator", async (request, reply) => {
     if (process.env.NODE_ENV === "production") {
-      const token = (request.query as { token?: string })?.token;
+      const cookieToken = (request as any).cookies?.admin_token;
+      const token = cookieToken || (request.query as { token?: string })?.token;
       if (!token) {
         return reply.status(403).send({ error: "Simulator is disabled in production environments" });
       }
@@ -190,7 +201,11 @@ async function bootstrap() {
   fastify.get("/ws", { websocket: true }, async (socket, request) => {
     const query = request.query as { token?: string } | undefined;
     const authHeader = request.headers.authorization;
-    const token = query?.token || (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null);
+    const cookieToken = (request as any).cookies?.admin_token;
+    const token =
+      cookieToken ||
+      query?.token ||
+      (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null);
 
     if (!token) {
       socket.close(4401, "Authentication token required");
@@ -208,15 +223,103 @@ async function bootstrap() {
     const clientId = Math.random().toString(36).substring(7);
     wsService.addClient(clientId, socket, decodedUser.id, decodedUser.role || "user");
 
+    // Per-socket message rate limiting (Availability Hardening)
+    let messageCount = 0;
+    let windowStart = Date.now();
+    const unlockTimestamps: number[] = [];
+
     socket.on("message", async (message) => {
       try {
+        const now = Date.now();
+        // Reset 5-second window
+        if (now - windowStart > 5000) {
+          messageCount = 0;
+          windowStart = now;
+        }
+        messageCount++;
+        // Protect against WS message flood DoS (>40 messages / 5 seconds = 8 msg/s)
+        if (messageCount > 40) {
+          fastify.log.warn({ clientId, userId: decodedUser.id }, "[WS-FLOOD] Message rate limit exceeded. Dropping socket.");
+          socket.close(4429, "Too Many Messages");
+          return;
+        }
+
         const data = JSON.parse(message.toString());
         if (data.type === "PING") {
           socket.send(JSON.stringify({ type: "PONG" }));
           return;
         }
-        if (data.type === "JOIN_ROOM" && data.deviceId) {
+        if (data.type === "JOIN_ROOM" && typeof data.deviceId === "string") {
           await wsService.joinRoom(clientId, data.deviceId);
+          return;
+        }
+        if (data.type === "UNLOCK_DEVICE" && typeof data.deviceId === "string") {
+          // Zero Trust: Admins are strictly prohibited from unlocking customer lockers
+          if (decodedUser.role === "admin") {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: "Admins are strictly prohibited from unlocking customer lockers for security and privacy.",
+            }));
+            return;
+          }
+
+          // Per-socket unlock rate limiting (max 5 unlocks / 60s)
+          const recentUnlocks = unlockTimestamps.filter((t) => now - t < 60000);
+          if (recentUnlocks.length >= 5) {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: "Unlock rate limit exceeded. Please wait 1 minute before trying again.",
+            }));
+            return;
+          }
+          unlockTimestamps.push(now);
+
+          try {
+            const rawDuration = typeof data.duration === "number" ? data.duration : 3000;
+            const clampedDuration = Math.min(Math.max(rawDuration, 1000), 10000); // 1s to 10s bounds
+
+            const result = await deviceStatusService.executeUnlock(
+              decodedUser.id,
+              decodedUser.role || "user",
+              data.deviceId.trim(),
+              clampedDuration
+            );
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: true,
+              deviceId: data.deviceId,
+              message: result.message,
+              commandId: result.commandId,
+              device: result.device,
+            }));
+          } catch (unlockErr: any) {
+            socket.send(JSON.stringify({
+              type: "UNLOCK_ACK",
+              success: false,
+              deviceId: data.deviceId,
+              error: unlockErr.message || "Failed to unlock device",
+            }));
+          }
+          return;
+        }
+        if (data.type === "GET_DEVICES") {
+          const query = (decodedUser.role === "admin")
+            ? {}
+            : { $or: [{ ownerId: decodedUser.id }, { coOwners: decodedUser.id }] };
+          const devices = await Device.find(query)
+            .select("-deviceKey -deviceKeyHash")
+            .populate("ownerId", "phone email name")
+            .lean();
+          const enriched = devices.map((d: any) => deviceStatusService.enrichWithLiveStatus(d));
+          socket.send(JSON.stringify({
+            type: "DEVICES_UPDATE",
+            devices: enriched,
+          }));
+          return;
         }
       } catch (error) {
         fastify.log.error(error, "WS message parse error");
@@ -248,22 +351,23 @@ async function bootstrap() {
   await User.collection.dropIndex("email_1").catch(() => {});
   await User.syncIndexes().catch(() => {});
 
-  // Start periodic watchdog timer for IoT device connectivity (runs every 10s)
-  const watchdogInterval = setInterval(checkDeviceWatchdog, 10 * 1000);
-  // Prune logs older than 24 hours on startup and periodically every hour
+  // Start periodic watchdog timer for IoT device connectivity (runs every 4s for rapid offline detection)
+  const watchdogInterval = setInterval(checkDeviceWatchdog, 4 * 1000);
+  // Rotate and prune logs on startup and periodically every 15 minutes (hourly rotation & 25 MB size cap check)
   pruneLogsOlderThan24Hours().catch(() => {});
   const logPruneInterval = setInterval(() => {
     pruneLogsOlderThan24Hours().catch((err) => {
       fastify.log.error(err, "Failed to prune logs older than 24 hours");
     });
-  }, 60 * 60 * 1000);
-  fastify.log.info("[CLEANUP] 24-hour log cleanup worker active (1h cycle)");
+  }, 15 * 60 * 1000);
+  fastify.log.info("[CLEANUP] Log rotation & 25 MB / 24-hour cleanup worker active (15m cycle)");
 
   // Graceful Shutdown Handlers (SIGTERM / SIGINT)
   const gracefulShutdown = async (signal: string) => {
     fastify.log.info(`[SHUTDOWN] Received ${signal}. Draining requests and closing connections cleanly...`);
     clearInterval(watchdogInterval);
     clearInterval(logPruneInterval);
+    deviceNotificationService.clearAllTimers();
     try {
       await fastify.close();
       await mongoose.disconnect();

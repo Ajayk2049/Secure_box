@@ -1,20 +1,34 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AppConfig {
-  static const String defaultLocalHost = '192.168.0.102:4300';
-  static const String prodHost = 'api.yourdomain.com';
+  static const String defaultLocalHost = '72.61.141.178:7000';
+  static const String prodHost = '72.61.141.178:7000';
 
   static bool _isProd = false;
   static String _activeHost = defaultLocalHost;
-  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  static const AndroidOptions _androidOptions = AndroidOptions(
+    encryptedSharedPreferences: true,
+    resetOnError: true,
+  );
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    aOptions: _androidOptions,
+  );
   static const String _hostStorageKey = 'smartbox_server_host';
 
   static Future<void> init({bool? isProd}) async {
-    final savedHost = await _storage.read(key: _hostStorageKey);
-    if (savedHost != null && _isValidDevHost(savedHost)) {
-      _activeHost = savedHost.trim();
-      _isProd = false;
-    } else {
+    try {
+      final savedHost = await _storage.read(key: _hostStorageKey).timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => null,
+      );
+      if (savedHost != null && _isValidDevHost(savedHost)) {
+        _activeHost = savedHost.trim();
+        _isProd = false;
+      } else {
+        _activeHost = defaultLocalHost;
+        _isProd = isProd ?? false;
+      }
+    } catch (_) {
       _activeHost = defaultLocalHost;
       _isProd = isProd ?? false;
     }

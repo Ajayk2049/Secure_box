@@ -30,8 +30,10 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
   void initState() {
     super.initState();
     final home = context.read<HomeViewModel>();
-    final devices = home.devices;
-    _selectedDevice = home.selectedDevice ?? (devices.isNotEmpty ? devices.first : null);
+    final owned = home.devices.where((d) => d.isOwner).toList();
+    _selectedDevice = (home.selectedDevice != null && home.selectedDevice!.isOwner)
+        ? home.selectedDevice
+        : (owned.isNotEmpty ? owned.first : null);
     _nameController = TextEditingController(text: _selectedDevice?.name ?? '');
   }
 
@@ -42,7 +44,7 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
   }
 
   Future<void> _handleRename() async {
-    if (_selectedDevice == null) return;
+    if (_selectedDevice == null || !_selectedDevice!.isOwner) return;
     final newName = _nameController.text.trim();
     if (newName.isEmpty) {
       setState(() => _errorMessage = 'Locker name cannot be empty');
@@ -78,7 +80,7 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
   @override
   Widget build(BuildContext context) {
     final home = context.watch<HomeViewModel>();
-    final devices = home.devices;
+    final ownedDevices = home.devices.where((d) => d.isOwner).toList();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -124,19 +126,38 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
         ),
         const SizedBox(height: 16),
 
-        if (devices.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(
-              child: Text(
-                'No smart lockers linked to this account.',
-                style: TextStyle(color: ParcelGlassColors.slateSubtitle, fontSize: 13),
+        if (ownedDevices.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+            decoration: BoxDecoration(
+              color: ParcelGlassColors.amberSignal.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: ParcelGlassColors.amberSignal.withValues(alpha: 0.35),
+                width: 1.0,
               ),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.shield_outlined, color: ParcelGlassColors.amberSignal, size: 22),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Only the primary owner can rename a locker box. You are currently connected as a co-owner.',
+                    style: TextStyle(
+                      color: ParcelGlassColors.navyTitle,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
             ),
           )
         else ...[
-          // Device Selector if multiple devices
-          if (devices.length > 1) ...[
+          // Device Selector if multiple owned devices
+          if (ownedDevices.length > 1) ...[
             const Text(
               'SELECT LOCKER BOX',
               style: TextStyle(
@@ -156,9 +177,9 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<DeviceModel>(
-                  value: _selectedDevice != null && devices.any((d) => d.id == _selectedDevice!.id)
-                      ? devices.firstWhere((d) => d.id == _selectedDevice!.id)
-                      : devices.first,
+                  value: _selectedDevice != null && ownedDevices.any((d) => d.id == _selectedDevice!.id)
+                      ? ownedDevices.firstWhere((d) => d.id == _selectedDevice!.id)
+                      : ownedDevices.first,
                   isExpanded: true,
                   icon: const Icon(Icons.arrow_drop_down, color: ParcelGlassColors.accentBlue),
                   onChanged: (DeviceModel? newDevice) {
@@ -169,7 +190,7 @@ class _RenameDeviceModalState extends State<RenameDeviceModal> {
                       });
                     }
                   },
-                  items: devices.map((d) {
+                  items: ownedDevices.map((d) {
                     return DropdownMenuItem<DeviceModel>(
                       value: d,
                       child: Text(

@@ -143,7 +143,7 @@ class _NetworkHostDialogState extends State<NetworkHostDialog> {
           ),
           decoration: InputDecoration(
             labelText: 'BACKEND HOST & PORT',
-            hintText: '192.168.0.101:4300',
+            hintText: '72.61.141.178:7000',
             labelStyle: const TextStyle(color: ParcelGlassColors.slateSubtitle, fontSize: 11.5, fontWeight: FontWeight.bold),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.25),
@@ -185,8 +185,8 @@ class _NetworkHostDialogState extends State<NetworkHostDialog> {
           spacing: 8,
           runSpacing: 6,
           children: [
-            _presetChip('192.168.0.101:4300', 'Laptop Wi-Fi'),
-            _presetChip('10.0.2.2:4300', 'Android Emulator'),
+            _presetChip('72.61.141.178:7000', 'VPS Cloud'),
+            _presetChip('192.168.0.101:4300', 'Local Wi-Fi'),
             _presetChip('localhost:4300', 'Localhost'),
           ],
         ),

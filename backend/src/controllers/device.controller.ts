@@ -6,7 +6,8 @@ import { Log } from "../models/Log.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
 import { deviceSocketService } from "../services/deviceSocket.service.js";
-import { generateDeviceKey } from "./adminRequests.controller.js";
+import { deviceStatusService } from "../services/deviceStatus.service.js";
+import { generateDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
 export function isAuthorizedUser(device: any, userId: string): boolean {
@@ -18,26 +19,26 @@ export function isAuthorizedUser(device: any, userId: string): boolean {
   return Boolean(isOwner || isCoOwner);
 }
 
-// 1. Get all devices belonging to or shared with the logged-in user
+// 1. Get all devices belonging to or shared with the logged-in user (Keys strictly excluded)
 export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
   const user = request.user as { id: string };
   const devices = await Device.find({
     $or: [{ ownerId: user.id }, { coOwners: user.id }],
   })
+    .select("-deviceKey -deviceKeyHash")
     .populate("ownerId", "email name")
     .populate("coOwners", "email name")
     .lean();
 
   const userId = (user?.id || (user as any)?._id)?.toString().trim().toLowerCase();
-  const now = Date.now();
 
   const mapped = devices.map((d: any) => {
     const obj = { ...d };
+    delete (obj as any).deviceKey;
+    delete (obj as any).deviceKeyHash;
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
-    const lastHb = d.lastHeartbeat ? new Date(d.lastHeartbeat).getTime() : 0;
-    // Live freshness evaluation: if device hasn't pinged in > 5.5s, report offline immediately
-    const isActuallyOnline = Boolean(d.online && (now - lastHb < 5500));
+    const isActuallyOnline = deviceStatusService.resolveDeviceOnline(d.deviceId, d.online, d.lastHeartbeat);
     return {
       ...obj,
       online: isActuallyOnline,
@@ -68,6 +69,7 @@ export async function createDevice(request: FastifyRequest, reply: FastifyReply)
     return reply.status(409).send({ error: "Device ID is already claimed by another user" });
   }
 
+  const rawKey = generateDeviceKey();
   const newDevice = await Device.create({
     deviceId: cleanDeviceId,
     name: name.trim(),
@@ -77,10 +79,14 @@ export async function createDevice(request: FastifyRequest, reply: FastifyReply)
     doorState: "closed",
     online: false,
     lastHeartbeat: null,
-    deviceKey: generateDeviceKey(),
+    deviceKeyHash: hashDeviceKey(rawKey),
   });
 
-  return reply.status(201).send({ device: newDevice, message: "Device successfully paired" });
+  const devObj = newDevice.toObject();
+  delete (devObj as any).deviceKeyHash;
+  delete (devObj as any).deviceKey;
+
+  return reply.status(201).send({ device: devObj, message: "Device successfully paired" });
 }
 
 // 3. User authenticated unlock command (Primary Owner OR Co-Owner only - Admins restricted)
@@ -94,90 +100,27 @@ export async function unlockDevice(request: FastifyRequest, reply: FastifyReply)
     });
   }
 
-  let device = null;
-  if (mongoose.Types.ObjectId.isValid(id)) {
-    device = await Device.findById(id);
+  try {
+    const result = await deviceStatusService.executeUnlock(user.id, user.role || "user", id);
+    return reply.send(result);
+  } catch (err: any) {
+    const msg = err.message || "Failed to unlock device";
+    if (msg.includes("not found")) return reply.status(404).send({ error: msg });
+    if (msg.includes("Not authorized")) return reply.status(403).send({ error: msg });
+    if (msg.includes("offline")) return reply.status(409).send({ error: msg });
+    return reply.status(500).send({ error: msg });
   }
-  if (!device) {
-    device = await Device.findOne({ deviceId: id.toUpperCase() });
-  }
-
-  if (!device) {
-    return reply.status(404).send({ error: "Device not found" });
-  }
-
-  if (!isAuthorizedUser(device, user.id)) {
-    return reply.status(403).send({ error: "Not authorized to unlock this device" });
-  }
-
-  const isOwner = device.ownerId.toString() === user.id;
-  const dbUser = await User.findById(user.id);
-  const userName = dbUser?.name || dbUser?.email || "User";
-  const userRole = isOwner ? "Owner" : "Co-Owner";
-
-  const enqueued = commandQueueService.enqueueCommand(device.deviceId, "unlock");
-
-  // Push directly to hardware if connected via WebSocket (instant sub-millisecond dispatch)
-  const isDirectlyPushed = deviceSocketService.sendUnlockCommand(device.deviceId, enqueued.commandId, 3000);
-
-  device.doorState = "open";
-  device.online = true;
-  await device.save();
-
-  await Log.create({
-    deviceId: device._id,
-    action: "unlock",
-    metadata: {
-      triggeredBy: user.id,
-      userName,
-      userRole,
-      userPhone: dbUser?.phone,
-      commandId: enqueued.commandId,
-      source: isDirectlyPushed ? "mobile_app_websocket_direct" : "mobile_app_queued",
-      deviceId: device.deviceId,
-    },
-  });
-
-  const unlockCommandMsg = {
-    type: "UNLOCK_COMMAND",
-    deviceId: device.deviceId,
-    commandId: enqueued.commandId,
-    unlockedBy: userName,
-    userRole,
-  };
-  wsService.broadcastToDevice(device.deviceId, unlockCommandMsg);
-
-  const statusMsg = {
-    type: "DEVICE_STATUS",
-    deviceId: device.deviceId,
-    doorState: "open",
-    doorStatus: "unlocked",
-    online: true,
-  };
-  const targets = [device.deviceId, device._id, device.ownerId, ...(device.coOwners || [])];
-  wsService.broadcastToDeviceGroup(targets, statusMsg);
-
-  return reply.send({
-    success: true,
-    message: isDirectlyPushed
-      ? "Unlock command dispatched in real-time to locker"
-      : "Unlock command queued successfully for device",
-    commandId: enqueued.commandId,
-    unlockedBy: userName,
-    userRole,
-    device: {
-      deviceId: device.deviceId,
-      name: device.name,
-      doorState: device.doorState,
-      online: device.online,
-    },
-  });
 }
 
-// 4. Get recent access & delivery logs
+// 4. Get recent access & delivery logs (with Today-guaranteed initial page & cursor pagination)
 export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
   const user = request.user as { id: string };
+  const queryParams = (request.query as {
+    todayStart?: string;
+    before?: string;
+    limit?: string;
+  }) || {};
 
   let device = null;
   if (mongoose.Types.ObjectId.isValid(id)) {
@@ -195,14 +138,78 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
     return reply.status(403).send({ error: "Not authorized" });
   }
 
-  const logs = await Log.find({
+  const baseFilter = {
     $or: [{ deviceId: device._id }, { "metadata.deviceId": device.deviceId }],
-    action: { $ne: "door_open" },
-  })
-    .sort({ timestamp: -1 })
-    .limit(100);
+    action: { $nin: ["door_open", "door_opened"] },
+  };
 
-  return reply.send({ logs });
+  const limit = Math.min(50, Math.max(1, parseInt(queryParams.limit || "15", 10)));
+  const { before, todayStart } = queryParams;
+
+  let logs: any[] = [];
+  let hasMore = false;
+
+  if (before) {
+    // Cursor-based pagination for older logs (Yesterday and earlier)
+    const beforeDate = new Date(before);
+    logs = await Log.find({
+      ...baseFilter,
+      timestamp: { $lt: beforeDate },
+    })
+      .sort({ timestamp: -1 })
+      .limit(limit + 1)
+      .lean();
+
+    if (logs.length > limit) {
+      hasMore = true;
+      logs.pop(); // Remove probe item
+    }
+  } else {
+    // Initial Load: Guarantee all of Today's activity + top up to limit with older logs if today < limit
+    const todayDate = todayStart ? new Date(todayStart) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const todayLogs = await Log.find({
+      ...baseFilter,
+      timestamp: { $gte: todayDate },
+    })
+      .sort({ timestamp: -1 })
+      .lean();
+
+    if (todayLogs.length >= limit) {
+      // If Today alone has >= limit items (e.g. 20, 25 items), return ALL of Today!
+      logs = todayLogs;
+      const olderCount = await Log.countDocuments({
+        ...baseFilter,
+        timestamp: { $lt: todayDate },
+      });
+      hasMore = olderCount > 0;
+    } else {
+      // If Today has fewer items, top up with older logs so initial view has at least 'limit' items
+      const needed = limit - todayLogs.length;
+      const olderLogs = await Log.find({
+        ...baseFilter,
+        timestamp: { $lt: todayDate },
+      })
+        .sort({ timestamp: -1 })
+        .limit(needed + 1)
+        .lean();
+
+      if (olderLogs.length > needed) {
+        hasMore = true;
+        olderLogs.pop(); // Remove probe item
+      }
+      logs = [...todayLogs, ...olderLogs];
+    }
+  }
+
+  const nextCursor = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+
+  return reply.send({
+    logs,
+    hasMore,
+    nextCursor,
+    count: logs.length,
+  });
 }
 
 // 5. Update Device / Box Name
@@ -227,8 +234,9 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
     return reply.status(404).send({ error: "Device not found" });
   }
 
-  if (!isAuthorizedUser(device, user.id)) {
-    return reply.status(403).send({ error: "Not authorized to rename this device" });
+  const isOwner = device.ownerId?.toString() === user.id || (device.ownerId as any)?._id?.toString() === user.id;
+  if (!isOwner) {
+    return reply.status(403).send({ error: "Only the primary owner can rename this locker box" });
   }
 
   device.name = name.trim();
@@ -241,7 +249,7 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
       id: device._id,
       deviceId: device.deviceId,
       name: device.name,
-      online: device.online,
+      online: deviceStatusService.resolveDeviceOnline(device.deviceId, device.online, device.lastHeartbeat),
       doorState: device.doorState,
     },
   });

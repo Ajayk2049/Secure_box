@@ -131,7 +131,7 @@ export function Profile({ mode }: ProfileProps = {}) {
     };
   }, []);
 
-  const startCooldown = (seconds = 10) => {
+  const startCooldown = (seconds = 60) => {
     setOtpCooldown(seconds);
     if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
     cooldownTimerRef.current = setInterval(() => {
@@ -175,7 +175,7 @@ export function Profile({ mode }: ProfileProps = {}) {
         throw new Error(data.error || "Failed to send OTP");
       }
       setInfoMessage("Verification code sent to your mobile number");
-      startCooldown(10);
+      startCooldown(60);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to send OTP");
     } finally {
@@ -198,6 +198,10 @@ export function Profile({ mode }: ProfileProps = {}) {
     }
     if (regPassword !== regConfirmPassword) {
       setErrorMessage("Passwords do not match");
+      return;
+    }
+    if (regEmail && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(regEmail.trim())) {
+      setErrorMessage("Please enter a valid email address (e.g. name@example.com)");
       return;
     }
 
@@ -411,9 +415,12 @@ export function Profile({ mode }: ProfileProps = {}) {
           loading={loading}
           onSendOtp={handleSendOtp}
           onSubmit={handleRegisterSubmit}
-          onSwitchToLogin={() => {
+          onSwitchToLogin={(prefill?: string) => {
             setIsRegister(false);
             setIsForgotPassword(false);
+            if (prefill) {
+              setLoginIdentifier(prefill);
+            }
             clearMessages();
           }}
         />

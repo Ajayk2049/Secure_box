@@ -8,6 +8,7 @@ import 'widgets/edit_profile_modal.dart';
 import 'widgets/manage_users_dialog.dart';
 import 'widgets/rename_device_modal.dart';
 import 'widgets/setting_capsule_tile.dart';
+import '../widgets/order_locker_modal.dart';
 
 import 'widgets/settings_modals.dart';
 import 'widgets/settings_profile_card.dart';
@@ -85,31 +86,38 @@ class SettingsScreen extends StatelessWidget {
                   userName: userName,
                   userPhone: userPhone,
                   accountScopeText: accountScopeText,
+                  avatarEmoji: auth.avatarEmoji,
                 ),
               ),
 
-              // 1. Edit Profile (Name, Email)
-              SettingCapsuleTile(
-                icon: Icons.person_outline,
-                title: 'Edit Profile',
-                subtitle: home.isOffline
-                    ? 'Unavailable while offline'
-                    : (user?.email != null && user!.email.isNotEmpty
-                        ? '${user.name ?? "Name"} • ${user.email}'
-                        : 'Name, Email Address'),
-                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
-              ),
-
-              // 2. Rename Smart Locker Box
+              // 1. Rename Smart Locker Box
               SettingCapsuleTile(
                 icon: Icons.edit_note,
                 title: 'Rename Locker Box',
                 subtitle: home.isOffline
                     ? 'Unavailable while offline'
                     : (home.selectedDevice != null
-                        ? '${home.selectedDevice!.name} (${home.selectedDevice!.deviceId})'
-                        : 'Personalize your locker name'),
-                onTap: home.isOffline ? () => _showOfflineWarning(context) : () => RenameDeviceModal.show(context),
+                        ? (home.selectedDevice!.isOwner
+                            ? '${home.selectedDevice!.name} (${home.selectedDevice!.deviceId})'
+                            : '${home.selectedDevice!.name} • Primary Owner Only')
+                        : (devices.any((d) => d.isOwner) ? 'Personalize your locker name' : 'Primary Owner Only')),
+                onTap: home.isOffline
+                    ? () => _showOfflineWarning(context)
+                    : () {
+                        if (home.selectedDevice != null && !home.selectedDevice!.isOwner && !devices.any((d) => d.isOwner)) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('Only primary owners can rename this locker box.'),
+                              backgroundColor: ParcelGlassColors.alertRed,
+                              behavior: SnackBarBehavior.floating,
+                              margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                          );
+                          return;
+                        }
+                        RenameDeviceModal.show(context);
+                      },
               ),
 
               // 3. Manage Users
@@ -120,6 +128,18 @@ class SettingsScreen extends StatelessWidget {
                     ? 'Unavailable while offline'
                     : 'Control who has access to your locker (2/5 active)',
                 onTap: home.isOffline ? () => _showOfflineWarning(context) : () => ManageUsersDialog.show(context),
+              ),
+
+              // Order New Locker Box
+              SettingCapsuleTile(
+                icon: Icons.local_shipping_outlined,
+                title: 'Order New Locker',
+                subtitle: user?.orderStatus != null && user!.orderStatus != 'none'
+                    ? 'Status: ${user.orderStatus!.toUpperCase()} • Free Doorstep Request'
+                    : 'Request additional smart locker units for your home',
+                onTap: home.isOffline
+                    ? () => _showOfflineWarning(context)
+                    : () => OrderLockerModal.show(context),
               ),
 
               // 4. Device & Network
@@ -158,6 +178,7 @@ class SettingsScreen extends StatelessWidget {
               // 6. Log Out Button
               SettingsSignOutButton(
                 onSignOut: () async {
+                  context.read<HomeViewModel>().reset();
                   await auth.logout();
                   if (context.mounted) {
                     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);

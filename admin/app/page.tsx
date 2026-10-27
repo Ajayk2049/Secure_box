@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { DashboardView } from "@/components/dashboard-view";
 import { LoginView } from "@/components/login-view";
 import { Server, Loader2 } from "lucide-react";
+import { adminFetch } from "@/lib/api";
 
 export default function AdminHome() {
   const [loading, setLoading] = useState(true);
@@ -44,32 +45,58 @@ export default function AdminHome() {
   };
 
   useEffect(() => {
-    try {
-      const token = localStorage.getItem("admin_token");
-      const userStr = localStorage.getItem("admin_user");
-
-      if (token && userStr) {
-        const user = JSON.parse(userStr);
-        if (user.role === "admin") {
-          setAdminUser(user);
-        } else {
-          localStorage.removeItem("admin_token");
-          localStorage.removeItem("admin_refresh_token");
-          localStorage.removeItem("admin_user");
+    let isMounted = true;
+    (async () => {
+      try {
+        const userStr = localStorage.getItem("admin_user");
+        if (userStr) {
+          try {
+            const cachedUser = JSON.parse(userStr);
+            if (cachedUser.role === "admin") {
+              setAdminUser(cachedUser);
+            }
+          } catch {}
         }
+
+        // Validate session with backend via httpOnly cookie
+        const res = await adminFetch("/auth/me");
+        if (!isMounted) return;
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user?.role === "admin") {
+            setAdminUser(data.user);
+            localStorage.setItem("admin_user", JSON.stringify(data.user));
+          } else {
+            localStorage.removeItem("admin_user");
+            setAdminUser(null);
+          }
+        } else {
+          localStorage.removeItem("admin_user");
+          setAdminUser(null);
+        }
+      } catch (e) {
+        console.error("Failed to verify admin session:", e);
+      } finally {
+        if (isMounted) setLoading(false);
       }
-    } catch (e) {
-      console.error("Failed to parse stored admin session:", e);
-    } finally {
-      setLoading(false);
-    }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const handleLoginSuccess = (user: any, token: string) => {
+  const handleLoginSuccess = (user: any) => {
     setAdminUser(user);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await adminFetch("/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Logout request error:", e);
+    }
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_refresh_token");
     localStorage.removeItem("admin_user");

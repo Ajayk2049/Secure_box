@@ -3,13 +3,16 @@ import crypto from "crypto";
 import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
+import { fcmService } from "./fcm.service.js";
+import { deviceNotificationService } from "./deviceNotification.service.js";
+import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 interface ConnectedDevice {
   ws: WebSocket;
   deviceId: string;
   connectedAt: Date;
   lastHeartbeat: Date;
-  isAlive: boolean;
+  missedPings: number;
 }
 
 class DeviceSocketService {
@@ -27,7 +30,7 @@ class DeviceSocketService {
     }
 
     const cleanId = deviceId.trim().toUpperCase();
-    const device = await Device.findOne({ deviceId: cleanId });
+    const device = await Device.findOne({ deviceId: cleanId }).select("+deviceKeyHash +deviceKey");
     if (!device) {
       return { authorized: false, reason: `Device '${cleanId}' not found` };
     }
@@ -35,22 +38,30 @@ class DeviceSocketService {
     // Dev/demo mode bypass
     if (process.env.NODE_ENV !== "production") {
       if (process.env.DEMO_MODE === "true" || providedKey === "SIMULATOR_TEST_KEY") {
-        if (!device.deviceKey) {
-          device.deviceKey = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
+        if (!device.deviceKeyHash && !device.deviceKey) {
+          const generated = `sbx_live_${crypto.randomBytes(16).toString("hex")}`;
+          device.deviceKeyHash = hashDeviceKey(generated);
           await device.save();
         }
         return { authorized: true, device };
       }
     }
 
-    if (!device.deviceKey || !providedKey) {
+    if (!providedKey) {
       return { authorized: false, reason: "Missing deviceKey" };
     }
 
-    const providedBuf = Buffer.from(providedKey.trim());
-    const actualBuf = Buffer.from(device.deviceKey.trim());
-    if (providedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(providedBuf, actualBuf)) {
+    const authCheck = verifyDeviceKey(providedKey, device.deviceKeyHash, device.deviceKey);
+    if (!authCheck.valid) {
       return { authorized: false, reason: "Invalid deviceKey" };
+    }
+
+    // Zero-downtime auto-upgrade: upgrade legacy plaintext key to SHA-256 hash immediately
+    if (authCheck.needsMigration) {
+      device.deviceKeyHash = hashDeviceKey(providedKey);
+      device.deviceKey = undefined;
+      await device.save().catch((err) => console.error(`[AUTH-MIGRATION] Failed to upgrade device ${cleanId}:`, err));
+      console.log(`[AUTH-MIGRATION] Automatically upgraded device ${cleanId} to SHA-256 hash.`);
     }
 
     return { authorized: true, device };
@@ -67,7 +78,7 @@ class DeviceSocketService {
     if (existing && existing.ws !== ws && existing.ws.readyState === WebSocket.OPEN) {
       try {
         existing.ws.close(4001, "New connection established for device");
-      } catch {}
+      } catch { }
     }
 
     const now = new Date();
@@ -76,15 +87,24 @@ class DeviceSocketService {
       deviceId: cleanId,
       connectedAt: now,
       lastHeartbeat: now,
-      isAlive: true,
+      missedPings: 0,
     });
 
     console.log(`[DEVICE-WS] Hardware connected: ${cleanId}`);
 
-    // Update MongoDB status to online
+    // Update MongoDB status to online with connection timestamp
     deviceDoc.online = true;
     deviceDoc.lastHeartbeat = now;
-    await deviceDoc.save().catch(() => {});
+    deviceDoc.lastConnectedAt = now;
+    await deviceDoc.save().catch(() => { });
+
+    // Create persistent activity log record
+    await Log.create({
+      deviceId: deviceDoc._id,
+      action: "device_online",
+      timestamp: now,
+      metadata: { source: "esp32_websocket", deviceId: cleanId },
+    }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_online for ${cleanId}:`, err));
 
     // Broadcast real-time online status to users & admins
     const targets = [cleanId, deviceDoc._id, deviceDoc.ownerId, ...(deviceDoc.coOwners || [])];
@@ -100,36 +120,81 @@ class DeviceSocketService {
       doorStatus: deviceDoc.doorState === "closed" ? "locked" : "unlocked",
       online: true,
     });
+
+    deviceNotificationService.handleDeviceOnline(deviceDoc);
   }
 
   /**
    * Handles hardware disconnect event immediately.
+   * If a newer active socket already replaced this one or socket is already disconnected, stale socket close is ignored.
    */
-  async handleDisconnect(deviceId: string): Promise<void> {
+  async handleDisconnect(deviceId: string, ws?: WebSocket): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
+    const current = this.devices.get(cleanId);
+
+    // Guard: If socket is already disconnected or belongs to an old replaced socket, do not process again
+    if (!current || (ws && current.ws !== ws)) {
+      return;
+    }
+
     this.devices.delete(cleanId);
     console.log(`[DEVICE-WS] Hardware disconnected: ${cleanId}`);
 
     try {
-      const device = await Device.findOne({ deviceId: cleanId });
-      if (device) {
-        device.online = false;
-        await device.save();
+      const disconnectTime = new Date();
+      // Atomic state transition: ONLY update and log if device was currently online (true -> false)
+      const device = await Device.findOneAndUpdate(
+        { deviceId: cleanId, online: true },
+        { $set: { online: false, lastDisconnectedAt: disconnectTime } },
+        { new: false }
+      );
 
-        const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
-        wsService.broadcastToDeviceGroup(targets, {
-          type: "DEVICE_OFFLINE",
-          deviceId: cleanId,
-          timestamp: new Date().toISOString(),
-        });
+      // If device was already offline, avoid duplicate audit log and broadcast!
+      if (!device) {
+        return;
       }
+
+      await Log.create({
+        deviceId: device._id,
+        action: "device_offline",
+        timestamp: disconnectTime,
+        metadata: { source: "esp32_websocket_disconnect", deviceId: cleanId },
+      }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_offline for ${cleanId}:`, err));
+
+      const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
+      wsService.broadcastToDeviceGroup(targets, {
+        type: "DEVICE_OFFLINE",
+        deviceId: cleanId,
+        timestamp: disconnectTime.toISOString(),
+      });
+      wsService.broadcastToDeviceGroup(targets, {
+        type: "DEVICE_STATUS",
+        deviceId: cleanId,
+        online: false,
+        doorState: device.doorState,
+      });
+
+      deviceNotificationService.scheduleOfflineNotification(device);
     } catch (err) {
       console.error(`[DEVICE-WS] Error handling disconnect for ${cleanId}:`, err);
     }
   }
 
   /**
+   * Records proof-of-life on incoming native WebSocket pong or ping frame.
+   */
+  recordPong(deviceId: string): void {
+    const cleanId = deviceId.trim().toUpperCase();
+    const conn = this.devices.get(cleanId);
+    if (conn) {
+      conn.lastHeartbeat = new Date();
+      conn.missedPings = 0;
+    }
+  }
+
+  /**
    * Handles incoming heartbeat from ESP32.
+   * Updates state purely in RAM to protect MongoDB from high-frequency disk I/O.
    */
   async handleHeartbeat(
     deviceId: string,
@@ -140,16 +205,47 @@ class DeviceSocketService {
     const now = new Date();
     if (conn) {
       conn.lastHeartbeat = now;
-      conn.isAlive = true;
+      conn.missedPings = 0;
     }
-
-    await Device.updateOne(
-      { deviceId: cleanId },
-      { $set: { online: true, lastHeartbeat: now } }
-    ).catch(() => {});
 
     if (conn && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify({ type: "HEARTBEAT_ACK", timestamp: now.getTime() }));
+    }
+  }
+
+  /**
+   * High-speed dead-socket sweeper: runs periodically (e.g. every 3s-5s).
+   * Actively sends RFC 6455 Ping frames and terminates unresponsive ghost sockets within 6-8s.
+   */
+  sweepConnections(): void {
+    const now = Date.now();
+    for (const [cleanId, conn] of this.devices.entries()) {
+      const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
+
+      // If device missed 3 consecutive pings (approx 12-16s) or complete silence > 30s
+      if (conn.missedPings >= 3 || timeSinceHeartbeat > 30000) {
+        console.log(
+          `[DEVICE-WS] Device ${cleanId} unresponsive for ${Math.round(timeSinceHeartbeat / 1000)}s (missed ${conn.missedPings} pings). Terminating ghost socket.`
+        );
+        try {
+          conn.ws.terminate();
+        } catch { }
+        this.handleDisconnect(cleanId, conn.ws);
+        continue;
+      }
+
+      // If socket is open, send native protocol ping and increment missed counter
+      if (conn.ws.readyState === WebSocket.OPEN) {
+        conn.missedPings++;
+        try {
+          conn.ws.ping();
+        } catch {
+          try { conn.ws.terminate(); } catch { }
+          this.handleDisconnect(cleanId, conn.ws);
+        }
+      } else if (conn.ws.readyState !== WebSocket.CONNECTING) {
+        this.handleDisconnect(cleanId, conn.ws);
+      }
     }
   }
 
@@ -173,6 +269,10 @@ class DeviceSocketService {
         action: doorState === "open" ? "door_opened" : "door_closed",
         metadata: { source: "esp32_sensor", deviceId: cleanId },
       });
+
+      if (doorState === "open") {
+        fcmService.notifyLockerOpened(device).catch((e) => console.error("[FCM] Locker opened notice error:", e));
+      }
     }
 
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
@@ -205,10 +305,17 @@ class DeviceSocketService {
     return true;
   }
 
+  /**
+   * Verifies if device has an active hardware WebSocket connection that communicated recently.
+   */
   isDeviceConnected(deviceId: string): boolean {
     const cleanId = deviceId.trim().toUpperCase();
     const conn = this.devices.get(cleanId);
-    return Boolean(conn && conn.ws.readyState === WebSocket.OPEN);
+    if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    // Verified alive in memory within the last 15 seconds
+    return Date.now() - conn.lastHeartbeat.getTime() < 15000;
   }
 
   getConnectedCount(): number {

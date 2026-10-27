@@ -16,6 +16,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
   final _otpController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
@@ -30,6 +31,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _cooldownTimer?.cancel();
     _phoneController.dispose();
+    _emailController.dispose();
     _otpController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
@@ -37,7 +39,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _startCooldown([int seconds = 10]) {
+  void _startCooldown([int seconds = 60]) {
     _cooldownTimer?.cancel();
     setState(() {
       _cooldownSeconds = seconds;
@@ -69,6 +71,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    // Pre-check if phone already exists before requesting OTP to avoid wasting SMS OTPs
+    final phoneCheck = await auth.checkPhone(phone);
+    if (!mounted) return;
+
+    if (phoneCheck['exists'] == true) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Account Already Exists', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(
+            phoneCheck['error'] ?? 'An account with this mobile number already exists. Please sign in instead.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ParcelGlassColors.mintSignal,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pushReplacementNamed(context, '/login', arguments: phone);
+              },
+              child: const Text('Sign In Instead', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final result = await auth.sendOtp(phone);
     if (!mounted) return;
 
@@ -82,6 +119,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
             result['error'] ?? 'An account with this mobile number already exists. Please sign in instead.',
           ),
           actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: ParcelGlassColors.mintSignal,
@@ -89,9 +130,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               onPressed: () {
                 Navigator.pop(ctx);
-                Navigator.pushReplacementNamed(context, '/login');
+                Navigator.pushReplacementNamed(context, '/login', arguments: phone);
               },
-              child: const Text('Go to Sign In', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Sign In Instead', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -100,7 +141,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     if (result['success'] == true) {
-      _startCooldown(10);
+      _startCooldown(60);
       setState(() {
         _otpSent = true;
         _infoMessage = result['message'] ?? 'OTP verification code sent!';
@@ -113,7 +154,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } else {
       if (result['cooldownRemaining'] != null) {
-        final waitSec = int.tryParse(result['cooldownRemaining'].toString()) ?? 10;
+        final waitSec = int.tryParse(result['cooldownRemaining'].toString()) ?? 60;
         _startCooldown(waitSec);
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -126,16 +167,96 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   void _handleRegister(AuthViewModel auth) async {
+    final email = _emailController.text.trim().toLowerCase();
+    if (email.isNotEmpty) {
+      final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+      if (!emailRegex.hasMatch(email)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a valid email address (e.g. name@example.com)'),
+            backgroundColor: ParcelGlassColors.alertRose,
+          ),
+        );
+        return;
+      }
+
+      final emailCheck = await auth.checkEmail(email);
+      if (!mounted) return;
+      if (emailCheck['exists'] == true) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Account Already Exists', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Text(
+              emailCheck['message'] ?? 'An account with this email address already exists. Please sign in instead.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ParcelGlassColors.mintSignal,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.pushReplacementNamed(context, '/login', arguments: email);
+                },
+                child: const Text('Sign In Instead', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
     final success = await auth.registerWithOtp(
       phone: _phoneController.text.trim(),
       otp: _otpController.text.trim(),
       password: _passwordController.text,
+      email: email.isNotEmpty ? email : null,
       name: _nameController.text.trim(),
       inviteCode: _inviteCodeController.text.trim(),
     );
 
     if (success && mounted) {
       Navigator.pushReplacementNamed(context, '/home');
+    } else if (!success && mounted) {
+      final err = auth.error ?? '';
+      if (err.toLowerCase().contains('already exists')) {
+        final prefill = err.toLowerCase().contains('email') && email.isNotEmpty
+            ? email
+            : _phoneController.text.trim();
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Account Already Exists', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Text(err),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ParcelGlassColors.mintSignal,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.pushReplacementNamed(context, '/login', arguments: prefill);
+                },
+                child: const Text('Sign In Instead', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -234,6 +355,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       RegisterCredentialsStep(
                         otpController: _otpController,
                         nameController: _nameController,
+                        emailController: _emailController,
                         passwordController: _passwordController,
                         inviteCodeController: _inviteCodeController,
                         auth: auth,

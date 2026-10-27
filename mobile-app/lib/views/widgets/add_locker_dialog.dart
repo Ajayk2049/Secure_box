@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:provider/provider.dart';
 import '../../view_models/home_view_model.dart';
 import 'add_locker/device_code_tab_view.dart';
@@ -122,8 +121,7 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Header
-
+          // Header
           Row(
             children: [
               Container(
@@ -161,70 +159,90 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
 
           const SizedBox(height: 18),
 
-          // LiquidGlassTabBar for tabs (pure text: Device Code & Join Code)
-          Center(
-            child: LiquidGlassTabBar(
-              width: 300,
-              height: 44,
-              margin: EdgeInsets.zero,
-              alignment: Alignment.center,
-              items: [
-                LiquidGlassTabBarItem(
-                  label: 'Device Code',
-                  iconBuilder: (_, __) => const SizedBox.shrink(),
+          // Glass Tab Selector (Fast, responsive, zero shader lag)
+          Container(
+            height: 42,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(21),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.50)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _selectedTab = 0;
+                      _errorMessage = null;
+                    }),
+                    behavior: HitTestBehavior.opaque,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      decoration: BoxDecoration(
+                        color: _selectedTab == 0 ? ParcelGlassColors.navyTitle : Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Device Code',
+                        style: TextStyle(
+                          color: _selectedTab == 0 ? Colors.white : ParcelGlassColors.slateSubtitle,
+                          fontSize: 12.5,
+                          fontWeight: _selectedTab == 0 ? FontWeight.w800 : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                LiquidGlassTabBarItem(
-                  label: 'Join Code',
-                  iconBuilder: (_, __) => const SizedBox.shrink(),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _selectedTab = 1;
+                      _errorMessage = null;
+                    }),
+                    behavior: HitTestBehavior.opaque,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      decoration: BoxDecoration(
+                        color: _selectedTab == 1 ? ParcelGlassColors.navyTitle : Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Join Code',
+                        style: TextStyle(
+                          color: _selectedTab == 1 ? Colors.white : ParcelGlassColors.slateSubtitle,
+                          fontSize: 12.5,
+                          fontWeight: _selectedTab == 1 ? FontWeight.w800 : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ],
-              selectedIndex: _selectedTab,
-              onChanged: (index) => setState(() {
-                _selectedTab = index;
-                _errorMessage = null;
-              }),
-              pillStyle: LiquidGlassTabPillStyle(
-                mode: LiquidGlassPillMode.both,
-                color: ParcelGlassColors.accentBlue.withValues(alpha: 0.18),
-                animated: true,
-              ),
-              itemStyle: const LiquidGlassTabItemStyle(
-                selectedColor: ParcelGlassColors.accentBlue,
-                unselectedColor: ParcelGlassColors.slateSubtitle,
-                iconSize: 0,
-                underGlassIconSize: 0,
-                iconLabelGap: 0,
-                labelFontSize: 13,
-                selectedFontWeight: FontWeight.w800,
-                unselectedFontWeight: FontWeight.w600,
-              ),
-              style: LiquidGlassStyle(
-                shape: const LiquidGlassShape.continuousRoundedRectangle(
-                  cornerRadius: 22,
-                  borderWidth: 1.0,
-                  borderColor: Color(0x40FFFFFF),
-                ),
-                appearance: LiquidGlassAppearance(
-                  color: Colors.white.withValues(alpha: 0.20),
-                  blur: const LiquidGlassBlur(sigmaX: 8, sigmaY: 8),
-                ),
-              ),
             ),
           ),
 
           const SizedBox(height: 18),
 
           // Tab Content
-          SizedBox(
-            height: 200,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
             child: _selectedTab == 0
                 ? DeviceCodeTabView(
+                    key: const ValueKey('tab_device_code'),
                     deviceIdController: _deviceIdController,
                     nameController: _nameController,
                     isSubmitting: _isSubmitting,
                     onSubmit: _submitDeviceCode,
                   )
                 : JoinCodeTabView(
+                    key: const ValueKey('tab_join_code'),
                     joinCodeController: _joinCodeController,
                     isSubmitting: _isSubmitting,
                     onSubmit: _submitJoinCode,
