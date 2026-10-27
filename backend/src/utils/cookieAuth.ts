@@ -16,7 +16,7 @@ export function setAuthCookies(
   reply.setCookie("admin_token", token, {
     path: "/",
     httpOnly: true,
-    sameSite: "strict",
+    sameSite: "lax",
     secure: isSecure,
     maxAge: 2 * 60 * 60, // 2 hours
   });
@@ -26,7 +26,7 @@ export function setAuthCookies(
     reply.setCookie("admin_refresh_token", refreshToken, {
       path: "/api/auth",
       httpOnly: true,
-      sameSite: "strict",
+      sameSite: "lax",
       secure: isSecure,
       maxAge: 7 * 24 * 60 * 60, // 7 days
     });
