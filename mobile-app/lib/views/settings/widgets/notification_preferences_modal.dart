@@ -32,36 +32,45 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
     _lockerConnectivity = prefs?.lockerConnectivity ?? false;
   }
 
-  Future<void> _updatePreferences({required bool doorStatus, required bool lockerConnectivity}) async {
+  Future<void> _handleSave() async {
+    if (_isSaving) return;
+
     setState(() {
-      _doorStatus = doorStatus;
-      _lockerConnectivity = lockerConnectivity;
       _isSaving = true;
     });
 
     final auth = context.read<AuthViewModel>();
     final success = await auth.updateNotificationPreferences(
-      doorStatus: doorStatus,
-      lockerConnectivity: lockerConnectivity,
+      doorStatus: _doorStatus,
+      lockerConnectivity: _lockerConnectivity,
     );
 
     if (!mounted) return;
 
     setState(() {
       _isSaving = false;
-      if (!success) {
-        // Rollback to previous state on failure
-        final curPrefs = auth.user?.notificationPreferences;
-        _doorStatus = curPrefs?.doorStatus ?? false;
-        _lockerConnectivity = curPrefs?.lockerConnectivity ?? false;
-      }
     });
 
-    if (!success) {
+    if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to update notification preferences. Please try again.'),
+        SnackBar(
+          content: const Text('Notification preferences saved successfully.'),
+          backgroundColor: ParcelGlassColors.accentBlue,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Failed to save notification preferences. Please try again.'),
           backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
@@ -108,7 +117,7 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               splashRadius: 18,
-              onPressed: () => Navigator.pop(context),
+              onPressed: _isSaving ? null : () => Navigator.pop(context),
             ),
           ],
         ),
@@ -135,10 +144,7 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
           value: _doorStatus,
           onChanged: _isSaving
               ? null
-              : (val) => _updatePreferences(
-                    doorStatus: val,
-                    lockerConnectivity: _lockerConnectivity,
-                  ),
+              : (val) => setState(() => _doorStatus = val),
         ),
 
         const SizedBox(height: 12),
@@ -151,15 +157,12 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
           value: _lockerConnectivity,
           onChanged: _isSaving
               ? null
-              : (val) => _updatePreferences(
-                    doorStatus: _doorStatus,
-                    lockerConnectivity: val,
-                  ),
+              : (val) => setState(() => _lockerConnectivity = val),
         ),
 
         const SizedBox(height: 20),
 
-        // Dismiss Button
+        // Save & Done Button
         SizedBox(
           height: 44,
           child: ElevatedButton(
@@ -171,11 +174,20 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
               ),
               elevation: 0,
             ),
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Done',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
-            ),
+            onPressed: _isSaving ? null : _handleSave,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text(
+                    'Done',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                  ),
           ),
         ),
       ],
@@ -189,67 +201,74 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
     required bool value,
     required ValueChanged<bool>? onChanged,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.25),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onChanged != null ? () => onChanged(!value) : null,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.50),
-          width: 1.0,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.50),
+              width: 1.0,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: value
+                      ? ParcelGlassColors.accentBlue.withValues(alpha: 0.15)
+                      : Colors.grey.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: value ? ParcelGlassColors.accentBlue : ParcelGlassColors.slateSubtitle,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: ParcelGlassColors.navyTitle,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: ParcelGlassColors.slateSubtitle,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch.adaptive(
+                value: value,
+                activeThumbColor: ParcelGlassColors.accentBlue,
+                activeTrackColor: ParcelGlassColors.accentBlue.withValues(alpha: 0.35),
+                onChanged: onChanged,
+              ),
+            ],
+          ),
         ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: value
-                  ? ParcelGlassColors.accentBlue.withValues(alpha: 0.15)
-                  : Colors.grey.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: value ? ParcelGlassColors.accentBlue : ParcelGlassColors.slateSubtitle,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: ParcelGlassColors.navyTitle,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: ParcelGlassColors.slateSubtitle,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Switch.adaptive(
-            value: value,
-            activeThumbColor: ParcelGlassColors.accentBlue,
-            activeTrackColor: ParcelGlassColors.accentBlue.withValues(alpha: 0.35),
-            onChanged: onChanged,
-          ),
-        ],
       ),
     );
   }

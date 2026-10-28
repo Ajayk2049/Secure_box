@@ -62,6 +62,10 @@ export async function placeOrder(request: FastifyRequest, reply: FastifyReply) {
       units: user.units,
       orderStatus: user.orderStatus,
       assignedDevices: user.assignedDevices || [],
+      notificationPreferences: {
+        doorStatus: user.notificationPreferences?.doorStatus ?? false,
+        lockerConnectivity: user.notificationPreferences?.lockerConnectivity ?? false,
+      },
     },
   });
 }

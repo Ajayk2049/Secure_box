@@ -77,8 +77,13 @@ class FcmService {
         }
 
         if (!isEnabledForUser) {
+          console.log(
+            `[FCM] Skipped push for user ${u._id}: ${eventType || "EVENT"} disabled (doorStatus: ${prefs?.doorStatus ?? false}, lockerConnectivity: ${prefs?.lockerConnectivity ?? false})`
+          );
           continue;
         }
+
+        console.log(`[FCM] Allowed push for user ${u._id}: ${eventType} enabled in preferences`);
 
         if (Array.isArray(u.fcmTokens)) {
           for (const token of u.fcmTokens) {
@@ -90,6 +95,7 @@ class FcmService {
       }
 
       if (allTokens.length === 0) {
+        console.log(`[FCM] No eligible recipient tokens for '${title}' [${eventType || "N/A"}]`);
         return;
       }
 

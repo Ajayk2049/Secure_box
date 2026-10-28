@@ -72,8 +72,8 @@ class UserModel {
       units: json['units'] is int ? json['units'] : (int.tryParse(json['units']?.toString() ?? '')),
       orderStatus: json['orderStatus'],
       notificationPreferences: NotificationPreferences.fromJson(
-        json['notificationPreferences'] is Map<String, dynamic>
-            ? json['notificationPreferences'] as Map<String, dynamic>
+        json['notificationPreferences'] is Map
+            ? Map<String, dynamic>.from(json['notificationPreferences'] as Map)
             : null,
       ),
     );

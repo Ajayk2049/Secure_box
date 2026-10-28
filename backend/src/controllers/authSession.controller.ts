@@ -117,6 +117,10 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
       units: resolvedUnits,
       orderStatus: latestRequest?.status || user.orderStatus,
       assignedDevices: latestRequest?.assignedDeviceIds || user.assignedDevices || [],
+      notificationPreferences: {
+        doorStatus: user.notificationPreferences?.doorStatus ?? false,
+        lockerConnectivity: user.notificationPreferences?.lockerConnectivity ?? false,
+      },
     },
     ...(isAdmin ? {} : { token, refreshToken }),
   });
@@ -222,6 +226,7 @@ export async function updateProfile(request: FastifyRequest, reply: FastifyReply
           ? notificationPreferences.lockerConnectivity
           : user.notificationPreferences?.lockerConnectivity ?? false,
     };
+    user.markModified("notificationPreferences");
   }
 
   await user.save();

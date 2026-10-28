@@ -336,6 +336,10 @@ export async function registerWithOtp(request: FastifyRequest, reply: FastifyRep
       units: newUser.units,
       orderStatus: newUser.orderStatus,
       assignedDevices: newUser.assignedDevices || [],
+      notificationPreferences: {
+        doorStatus: newUser.notificationPreferences?.doorStatus ?? false,
+        lockerConnectivity: newUser.notificationPreferences?.lockerConnectivity ?? false,
+      },
     },
     token,
     refreshToken,
