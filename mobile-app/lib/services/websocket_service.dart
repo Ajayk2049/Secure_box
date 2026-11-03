@@ -160,7 +160,7 @@ class WebSocketService {
   }
 
   /// Sends an instant unlock command over the active WebSocket connection.
-  Future<Map<String, dynamic>> sendUnlockCommand(String deviceId, [int durationMs = 3000]) async {
+  Future<Map<String, dynamic>> sendUnlockCommand(String deviceId, [int durationMs = 200]) async {
     final clean = deviceId.trim().toUpperCase();
     if (!_isConnected || _channel == null) {
       throw Exception('WebSocket not connected');

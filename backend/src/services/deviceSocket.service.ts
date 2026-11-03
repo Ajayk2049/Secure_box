@@ -298,8 +298,9 @@ class DeviceSocketService {
 
   /**
    * Pushes instant unlock command to connected ESP32 in sub-millisecond time.
+   * Defaults to 200ms power pulse to align with firmware DEFAULT_UNLOCK_DURATION.
    */
-  sendUnlockCommand(deviceId: string, commandId: string, durationMs = 3000): boolean {
+  sendUnlockCommand(deviceId: string, commandId: string, durationMs = 200): boolean {
     const cleanId = deviceId.trim().toUpperCase();
     const conn = this.devices.get(cleanId);
     if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
@@ -312,7 +313,7 @@ class DeviceSocketService {
       duration: durationMs,
     });
     conn.ws.send(payload);
-    console.log(`[DEVICE-WS] Pushed instant UNLOCK to ${cleanId} (cmd: ${commandId})`);
+    console.log(`[DEVICE-WS] Pushed instant UNLOCK to ${cleanId} (cmd: ${commandId}, duration: ${durationMs}ms)`);
     return true;
   }
 

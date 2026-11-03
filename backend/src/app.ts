@@ -279,8 +279,13 @@ async function bootstrap() {
           unlockTimestamps.push(now);
 
           try {
-            const rawDuration = typeof data.duration === "number" ? data.duration : 3000;
-            const clampedDuration = Math.min(Math.max(rawDuration, 1000), 10000); // 1s to 10s bounds
+            let duration = typeof data.duration === "number" ? data.duration : 200;
+            if (duration === 3000 || duration < 100) {
+              duration = 200; // Align with firmware DEFAULT_UNLOCK_DURATION (200ms solenoid pulse)
+            } else if (duration > 5000) {
+              duration = 5000;
+            }
+            const clampedDuration = duration;
 
             const result = await deviceStatusService.executeUnlock(
               decodedUser.id,

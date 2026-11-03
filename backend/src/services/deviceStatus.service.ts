@@ -77,7 +77,7 @@ export class DeviceStatusService {
     userId: string,
     userRole = "user",
     deviceIdOrId: string,
-    durationMs = 3000
+    durationMs = 200
   ): Promise<{
     success: boolean;
     message: string;
