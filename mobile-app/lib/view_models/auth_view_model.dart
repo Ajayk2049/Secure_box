@@ -68,38 +68,49 @@ class AuthViewModel extends ChangeNotifier {
 
       final hasToken = await _storage.hasToken();
       if (hasToken) {
-        try {
-          final res = await _api.getMe();
-          if (res['user'] != null) {
-            _user = UserModel.fromJson(res['user']);
-            await _storage.saveUserData(jsonEncode(res['user']));
-            NotificationService().syncToken();
-          }
-        } catch (e) {
-          final errStr = e.toString().toLowerCase();
-          final is401 = errStr.contains('401') || errStr.contains('unauthorized');
-          if (is401) {
-            // Token is expired / revoked: clean dead credentials and notify user
-            await _storage.deleteToken();
-            await _storage.deleteRefreshToken();
-            _user = null;
-            setErrorWithAutoDismiss("Your session has expired. Please sign in again.");
-          } else {
-            // Truly offline: restore cached profile
-            final cached = await _storage.getUserData();
-            if (cached != null) {
-              try {
-                _user = UserModel.fromJson(jsonDecode(cached));
-              } catch (_) {}
-            }
-          }
+        // Fast Path: Restore cached user data immediately (<5ms) to render HomeScreen instantly
+        final cached = await _storage.getUserData();
+        if (cached != null) {
+          try {
+            _user = UserModel.fromJson(jsonDecode(cached));
+          } catch (_) {}
         }
+        _loading = false;
+        _initialized = true;
+        notifyListeners();
+
+        // Background Path: Revalidate user profile & token validity asynchronously
+        _revalidateSession();
+        return;
       }
     } catch (_) {}
 
     _loading = false;
     _initialized = true;
     notifyListeners();
+  }
+
+  Future<void> _revalidateSession() async {
+    try {
+      final res = await _api.getMe();
+      if (res['user'] != null) {
+        _user = UserModel.fromJson(res['user']);
+        await _storage.saveUserData(jsonEncode(res['user']));
+        notifyListeners();
+        NotificationService().syncToken();
+      }
+    } catch (e) {
+      final errStr = e.toString().toLowerCase();
+      final is401 = errStr.contains('401') || errStr.contains('unauthorized');
+      if (is401) {
+        await _storage.deleteToken();
+        await _storage.deleteRefreshToken();
+        _user = null;
+        setErrorWithAutoDismiss("Your session has expired. Please sign in again.");
+        notifyListeners();
+        appNavigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    }
   }
 
   // 1. Smart Pre-Check & Send OTP

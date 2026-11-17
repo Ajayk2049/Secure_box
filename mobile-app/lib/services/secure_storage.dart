@@ -122,6 +122,20 @@ class SecureStorage {
   Future<void> deleteCachedLogs(String deviceId) async =>
       _safeDelete('cached_logs_${deviceId.trim().toUpperCase()}');
 
+  // --- Per-User Biometric Unlock Security ---
+  Future<bool> isBiometricUnlockEnabled() async {
+    final val = await _safeRead('biometric_unlock_enabled');
+    return val == 'true';
+  }
+
+  Future<void> setBiometricUnlockEnabled(bool enabled) async {
+    if (enabled) {
+      await _safeWrite('biometric_unlock_enabled', 'true');
+    } else {
+      await _safeDelete('biometric_unlock_enabled');
+    }
+  }
+
   /// Purges all session tokens, credentials, and cached data on logout
   Future<void> purgeAllSessionData() async {
     await deleteToken();

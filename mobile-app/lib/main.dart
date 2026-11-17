@@ -25,11 +25,15 @@ void main() async {
   try {
     await LiquidGlassShaders.ensureLoaded();
   } catch (_) {}
-  try {
-    await NotificationService().initialize();
-  } catch (_) {}
 
   runApp(const SecureBoxApp());
+
+  // Non-blocking background initialization (avoids delaying initial app frame)
+  Future.microtask(() async {
+    try {
+      await NotificationService().initialize();
+    } catch (_) {}
+  });
 }
 
 class SecureBoxApp extends StatelessWidget {

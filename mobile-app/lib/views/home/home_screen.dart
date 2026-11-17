@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/device.model.dart';
+import '../../services/biometric_service.dart';
+import '../../services/secure_storage.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import '../settings/settings_screen.dart';
@@ -120,6 +122,21 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
+
+    // Per-user/phone biometric verification guard
+    final isBiometricEnabled = await SecureStorage().isBiometricUnlockEnabled();
+    if (isBiometricEnabled) {
+      final lockerName = device.name.isNotEmpty ? device.name : device.deviceId;
+      final authenticated = await BiometricService().authenticate(
+        reason: 'Scan fingerprint to unlock $lockerName',
+      );
+      if (!authenticated) {
+        // Biometric prompt cancelled or failed: abort unlock and keep door locked
+        return;
+      }
+    }
+
+    if (!mounted) return;
     setState(() => _unlockingDeviceId = device.deviceId);
     try {
       await context.read<HomeViewModel>().unlockDevice(device.deviceId);

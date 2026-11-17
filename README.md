@@ -79,6 +79,7 @@ graph TD
 - **Architecture**: MVVM
 - **HTTP**: Dio
 - **Storage**: flutter_secure_storage
+- **Biometrics**: local_auth (Fingerprint / Face ID hardware unlock)
 - **State**: Provider + ChangeNotifier
 
 ## Project Structure

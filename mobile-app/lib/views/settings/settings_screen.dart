@@ -8,6 +8,7 @@ import 'widgets/edit_profile_modal.dart';
 import 'widgets/manage_users_dialog.dart';
 import 'widgets/rename_device_modal.dart';
 import 'widgets/notification_preferences_modal.dart';
+import 'widgets/biometric_security_tile.dart';
 import 'widgets/setting_capsule_tile.dart';
 import '../widgets/order_locker_modal.dart';
 import 'widgets/settings_modals.dart';
@@ -159,7 +160,10 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => NotificationPreferencesModal.show(context),
               ),
 
-              // 5. About
+              // 5. Biometric Unlock Security (Per-User / Per-Phone)
+              const BiometricSecurityTile(),
+
+              // 6. About
               SettingCapsuleTile(
                 icon: Icons.info_outline,
                 title: 'About',

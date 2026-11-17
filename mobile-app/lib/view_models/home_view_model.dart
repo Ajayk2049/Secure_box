@@ -70,8 +70,7 @@ class HomeViewModel extends ChangeNotifier {
     if (_isInitialized) return;
     _isInitialized = true;
     _isCheckingReachability = true;
-    _loading = true;
-    notifyListeners();
+    _loading = false;
 
     // Listen for global session expiry events (from 401s or WS 4401 close code)
     _sessionExpirySub?.cancel();
@@ -79,30 +78,52 @@ class HomeViewModel extends ChangeNotifier {
       reset();
     });
 
-    // 1. Perform fast startup connectivity diagnosis (<1.5s)
-    final initialIssue = await _connectivity.checkConnectivity();
-    _connectionIssue = initialIssue;
-    _isCheckingReachability = false;
+    // 1. FAST PATH: Load cached devices immediately so locker card appears on Frame 0 (<5ms)
+    await _loadCachedDevices();
+    notifyListeners();
 
-    if (initialIssue != ConnectionIssue.none) {
-      // If device is offline on app start, load cached names as fallback with offline status
-      await _loadCachedDevices();
-      _devices = _devices.map((d) => d.copyWith(online: false)).toList();
-      _loading = false;
-      notifyListeners();
-    } else {
-      // 1. Fetch devices via HTTP first (verifies and refreshes tokens seamlessly if needed)
-      await fetchDevices();
+    // 2. BACKGROUND PATH: Sync live devices & connect WebSocket without blocking UI launch
+    _syncStartupState();
 
-      // 2. Connect WebSocket after token is guaranteed fresh and valid
+    _setupPollTimer();
+  }
+
+  Future<void> _syncStartupState() async {
+    try {
+      final devicesData = await _api.getDevices();
+      _failedPollAttempts = 0;
+      _connectionIssue = ConnectionIssue.none;
+      final newDevices = devicesData
+          .map((json) => DeviceModel.fromJson(json))
+          .toList();
+
+      _cacheManager.saveCachedDevices(devicesData);
+      final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+      _devices = _reconcileWithCurrentState(updatedDevices);
+      if (_devices.isNotEmpty && _selectedDeviceId == null) {
+        _selectedDeviceId = _devices.first.deviceId;
+      }
+
       _ws.connect();
       _wsMessageSub?.cancel();
       _wsMessageSub = _ws.stream.listen((message) {
         _handleWebSocketMessage(message);
       });
+      for (final d in _devices) {
+        _ws.joinRoom(d.id);
+        _ws.joinRoom(d.deviceId);
+      }
+    } catch (e) {
+      final errLower = e.toString().toLowerCase();
+      if (errLower.contains('401') || errLower.contains('unauthorized')) {
+        reset();
+        return;
+      }
+      _diagnoseConnectivity();
+    } finally {
+      _isCheckingReachability = false;
+      notifyListeners();
     }
-
-    _setupPollTimer();
   }
 
   void _setupPollTimer() {

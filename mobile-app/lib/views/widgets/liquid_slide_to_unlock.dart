@@ -190,7 +190,7 @@ class _LiquidSlideToUnlockState extends State<LiquidSlideToUnlock>
                                   const SizedBox(width: 6),
                                   Text(
                                     widget.isChecking
-                                        ? 'CHECKING SERVER...'
+                                        ? 'CONNECTING TO LOCKER...'
                                         : (!widget.isLockerOnline
                                             ? 'LOCKER OFFLINE • UNLOCK DISABLED'
                                             : 'SERVER OFFLINE • UNLOCK DISABLED'),

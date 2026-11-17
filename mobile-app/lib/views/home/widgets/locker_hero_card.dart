@@ -134,10 +134,10 @@ class LockerHeroCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      isChecking ? 'CHECKING...' : (isOnline ? 'ONLINE' : 'OFFLINE'),
+                      isChecking ? 'CONNECTING...' : (isOnline ? 'ONLINE' : 'OFFLINE'),
                       style: TextStyle(
                         color: isChecking
-                            ? Colors.grey.shade700
+                            ? const Color(0xFFB45309)
                             : (isOnline ? ParcelGlassColors.mintSignal : const Color(0xFFB45309)),
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
