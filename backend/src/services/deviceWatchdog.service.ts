@@ -1,93 +1,66 @@
 import { Device } from "../models/Device.model.js";
-import { Log } from "../models/Log.model.js";
-import { wsService } from "./websocket.service.js";
-import { deviceSocketService, getGhostTimeoutMs } from "./deviceSocket.service.js";
-import { deviceNotificationService } from "./deviceNotification.service.js";
+import { deviceSocketService } from "./deviceSocket.service.js";
+import { devicePresenceService } from "./devicePresence.service.js";
+import { config } from "../config.js";
 
-function dbHeartbeatAgeMs(value: Date | string | null | undefined): number | null {
-  if (!value) return null;
-  const ms = new Date(value).getTime();
-  if (!Number.isFinite(ms)) return null;
-  return Date.now() - ms;
-}
+/** Documented single decision path, kept in the log so incidents are traceable. */
+const DECISION_OWNER = "devicePresenceService";
 
 /**
- * Background watchdog worker: marks devices offline when no heartbeat or WebSocket frame received.
- * Actively connected WebSocket devices are protected from being marked offline.
+ * Background watchdog worker.
+ *
+ * Phase 1: this function no longer decides whether a device is online. It has
+ * exactly two jobs:
+ *
+ *   1. Socket hygiene — reap ghost sockets (RAM only, never user-visible).
+ *   2. DB catch-up — for devices that have no RAM record (e.g. the process
+ *      restarted, or a device never connected since boot), the DB projection is
+ *      the only evidence available. Those are handed to the presence authority,
+ *      which applies the same `restartFallbackSec` window used by reads, so a
+ *      poll and the watchdog can never disagree.
+ *
+ * The former "mark offline using a stale DB timestamp while only validating a
+ * 15 s RAM window" path is gone: that was defect (B), the source of the false
+ * offline pushes.
  */
 export async function checkDeviceWatchdog(): Promise<void> {
   try {
-    // 1. High-frequency in-memory ping sweep: reaps ghost sockets and terminates dead connections
+    // 1. RAM sweep: terminate silent sockets. Deliberately does not publish.
     deviceSocketService.sweepConnections();
 
-    // 2. Database safety sweep: catches any offline devices not covered by active sockets
-    const ghostCutoffMs = getGhostTimeoutMs();
-    const threshold = new Date(Date.now() - ghostCutoffMs);
-    const staleDevices = await Device.find({
-      online: true,
-      $or: [{ lastHeartbeat: { $lt: threshold } }, { lastHeartbeat: null }],
-    });
+    // 2. Defensive reconcile of every tracked device (timers are primary).
+    await devicePresenceService.reconcileTracked();
 
-    if (staleDevices.length === 0) return;
+    // 3. DB catch-up for devices with no RAM record at all.
+    const fallbackWindowMs = config.deviceRestartFallbackSec * 1000;
+    const cutoff = new Date(Date.now() - fallbackWindowMs);
 
-    const actuallyStale = [];
+    const staleDevices = await Device.find(
+      {
+        online: true,
+        $or: [{ lastHeartbeat: { $lt: cutoff } }, { lastHeartbeat: null }],
+      },
+      { deviceId: 1 }
+    )
+      .lean()
+      .catch(() => []);
 
-    for (const dev of staleDevices) {
-      // Only protect if connection is genuinely fresh in RAM
-      const protectedBySocket = deviceSocketService.isDeviceConnected(dev.deviceId);
-      if (protectedBySocket) {
-        const snap = deviceSocketService.getConnectionSnapshot(dev.deviceId);
-        console.log(
-          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_protect device=${dev.deviceId} ` +
-            `dbOnline=true dbHeartbeatAgeMs=${dbHeartbeatAgeMs(dev.lastHeartbeat)} cutoffMs=${ghostCutoffMs} ` +
-            `socketTracked=${snap.tracked} socketState=${snap.state} socketAgeMs=${snap.lastActivityAgeMs} ` +
-            `socketFresh=${snap.isFresh} missedPings=${snap.missedPings} decision=KEEP_ONLINE reason=socket_fresh`
-        );
-      } else {
-        const snap = deviceSocketService.getConnectionSnapshot(dev.deviceId);
-        console.log(
-          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_demote device=${dev.deviceId} ` +
-            `dbOnline=true dbHeartbeatAgeMs=${dbHeartbeatAgeMs(dev.lastHeartbeat)} cutoffMs=${ghostCutoffMs} ` +
-            `socketTracked=${snap.tracked} socketState=${snap.state} socketAgeMs=${snap.lastActivityAgeMs} ` +
-            `socketFresh=${snap.isFresh} missedPings=${snap.missedPings} decision=MARK_OFFLINE reason=no_fresh_socket`
-        );
-        actuallyStale.push(dev);
-      }
-    }
+    for (const stale of staleDevices) {
+      const cleanId = String(stale?.deviceId || "").trim().toUpperCase();
+      if (!cleanId) continue;
 
-    if (actuallyStale.length === 0) return;
+      // If it is tracked in RAM, the authority already has better evidence.
+      if (devicePresenceService.peek(cleanId)) continue;
 
-    const now = new Date();
-    for (const dev of actuallyStale) {
-      // Atomic state transition: ONLY log if device is currently online (true -> false)
-      const freshlyStale = await Device.findOneAndUpdate(
-        { _id: dev._id, online: true },
-        { $set: { online: false, lastDisconnectedAt: now } },
-        { new: false }
+      // Seeds the record from this stale row; publishes only if the record ends
+      // up confirmed offline, so a device that reconnected in between is safe.
+      console.log(
+        `[WATCHDOG-TRACE] at=${new Date().toISOString()} db_catchup device=${cleanId} ` +
+          `decisionOwner=${DECISION_OWNER} fallbackWindowMs=${fallbackWindowMs}`
       );
-
-      if (freshlyStale) {
-        console.log(
-          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_applied device=${dev.deviceId} transition=ONLINE_TO_OFFLINE source=watchdog_timeout`
-        );
-        await Log.create({
-          deviceId: dev._id,
-          action: "device_offline",
-          timestamp: now,
-          metadata: { source: "watchdog_timeout", reason: "heartbeat_timeout", deviceId: dev.deviceId },
-        }).catch((err) => console.error("Error creating watchdog offline log:", err));
-
-        const offlineMsg = {
-          type: "DEVICE_STATUS",
-          deviceId: dev.deviceId,
-          online: false,
-          doorState: dev.doorState,
-        };
-        wsService.broadcastToDeviceGroup([dev.deviceId, dev._id, dev.ownerId], offlineMsg);
-        deviceNotificationService.scheduleOfflineNotification(dev);
-      }
+      await devicePresenceService.confirmOffline(cleanId, "watchdog_timeout");
     }
   } catch (err) {
-    console.error("Error in device watchdog:", err);
+    console.error("[WATCHDOG] Presence reconcile failed:", err);
   }
 }

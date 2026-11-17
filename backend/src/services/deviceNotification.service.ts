@@ -30,7 +30,7 @@ class DeviceNotificationService {
       return;
     }
 
-    const graceSec = config.deviceOfflineGracePeriodSec || 60;
+    const graceSec = config.deviceOfflineGracePeriodSec || 30;
     const graceMs = graceSec * 1000;
 
     const timer = setTimeout(async () => {
@@ -83,6 +83,21 @@ class DeviceNotificationService {
     } else {
       console.log(`[FCM-GRACE] Device ${cleanId} connected. Suppressed online notification (no prior offline alert delivered).`);
     }
+  }
+
+  /**
+   * Cancels a pending offline alert without considering a recovery "event".
+   * Used for silent recoveries (frames resumed before anyone was told the
+   * device was offline), so no online push is emitted either.
+   */
+  cancelPendingOfflineAlert(deviceId: string): void {
+    const cleanId = String(deviceId || "").trim().toUpperCase();
+    if (!cleanId) return;
+    const pendingTimer = this.pendingOfflineTimers.get(cleanId);
+    if (!pendingTimer) return;
+    clearTimeout(pendingTimer);
+    this.pendingOfflineTimers.delete(cleanId);
+    console.log(`[FCM-GRACE] Device ${cleanId} recovered before confirmation. Cancelled pending offline alert.`);
   }
 
   /**

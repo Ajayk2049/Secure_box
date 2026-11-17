@@ -7,6 +7,7 @@ import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
 import { deviceSocketService } from "../services/deviceSocket.service.js";
 import { deviceStatusService } from "../services/deviceStatus.service.js";
+import { devicePresenceService } from "../services/devicePresence.service.js";
 import { generateDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 
 // Helper to verify user access (Primary Owner OR Co-Owner)
@@ -275,6 +276,9 @@ export async function getDeviceStatusDebug(request: FastifyRequest, reply: Fasti
 
   return reply.send({
     status: deviceStatusService.buildStatusDebug(device),
+    // Phase 1: process-wide presence authority state (tracked devices, timers,
+    // publish counters). Read-only; never mutates presence.
+    presence: devicePresenceService.getDiagnostics(),
     history: {
       windowHours,
       since: since.toISOString(),

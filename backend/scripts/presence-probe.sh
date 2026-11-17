@@ -101,8 +101,18 @@ let r="";process.stdin.on("data",d=>r+=d).on("end",()=>{
   let j;try{j=JSON.parse(r)}catch{console.log("  unreadable response: "+r.slice(0,200));return}
   const t=(j.status&&j.status.thresholds)||{};
   console.log("  socketFreshnessMs = "+(t.socketFreshnessMs??"?"));
-  console.log("  dbHeartbeatFallbackMs = "+(t.dbHeartbeatFallbackMs??"?"));
-  console.log("  ghostTimeoutMs = "+(t.ghostTimeoutMs??"?"));
+  console.log("  suspectMs         = "+(t.suspectMs??"?"));
+  console.log("  offlineMs         = "+(t.offlineMs??"?"));
+  console.log("  persistMs         = "+(t.persistMs??"?"));
+  console.log("  restartFallbackMs = "+(t.restartFallbackMs??"?"));
+  console.log("  ghostTimeoutMs    = "+(t.ghostTimeoutMs??"?"));
+  console.log("  offlineGraceMs    = "+(t.offlineGraceMs??"?"));
+  const p=j.presence;
+  if (p) {
+    console.log("----- presence authority -----");
+    console.log("  tracked="+(p.tracked??"?")+" online="+(p.online??"?")+" suspect="+(p.suspect??"?")+" offline="+(p.offline??"?")+" flusher="+(p.flusherActive??"?"));
+    console.log("  stats="+JSON.stringify(p.stats??{}));
+  }
   const h=j.history||{};
   console.log("----- churn history, last "+(h.windowHours??"?")+"h -----");
   console.log("  reconnects (device_online) = "+((h.counts&&h.counts.online)??"?"));

@@ -4,9 +4,10 @@ import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { fcmService } from "./fcm.service.js";
-import { deviceNotificationService } from "./deviceNotification.service.js";
+import { devicePresenceService } from "./devicePresence.service.js";
 import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 import { config } from "../config.js";
+import type { PresenceState } from "./devicePresence.state.js";
 
 interface ConnectedDevice {
   ws: WebSocket;
@@ -18,19 +19,20 @@ interface ConnectedDevice {
 
 export type DeviceSocketState = "OPEN" | "CONNECTING" | "CLOSING" | "CLOSED" | "UNKNOWN";
 
-/** How recent RAM activity must be for a socket to count as "genuinely alive". */
+/**
+ * Phase 1: RAM activity window for *socket* liveness (ghost detection and
+ * diagnostics only). This is NEVER used to decide user-visible online status —
+ * that is owned exclusively by devicePresenceService.getPresence().
+ */
 export const SOCKET_FRESHNESS_MS = 15_000;
-
-/** Fallback DB heartbeat window used by resolveDeviceOnline when no live socket exists. */
-export const DB_HEARTBEAT_FALLBACK_MS = 25_000;
 
 /** Total silence after which a tracked socket is considered a ghost and terminated. */
 export function getGhostTimeoutMs(): number {
-  return (config.deviceGhostTimeoutSec || 30) * 1000;
+  return (config.deviceGhostTimeoutSec || 45) * 1000;
 }
 
 /**
- * Phase 0 diagnostics: raw in-memory view of a hardware socket.
+ * Phase 0/1 diagnostics: raw in-memory view of a hardware socket.
  * Read-only; used by the status-debug endpoint and watchdog tracing.
  */
 export interface DeviceSocketSnapshot {
@@ -44,6 +46,10 @@ export interface DeviceSocketSnapshot {
   isFresh: boolean;
   freshnessWindowMs: number;
   ghostTimeoutMs: number;
+  /** Phase 1: presence view for the same device, straight from the authority. */
+  presenceState: PresenceState | null;
+  presencePublishedOnline: boolean | null;
+  presenceSilenceMs: number | null;
 }
 
 function socketStateName(readyState: number): DeviceSocketState {
@@ -122,6 +128,10 @@ class DeviceSocketService {
 
   /**
    * Registers an authenticated ESP32 WebSocket connection.
+   *
+   * Phase 1: a reconnect is NOT a status event. It feeds proof-of-life into the
+   * presence authority, which publishes `DEVICE_ONLINE` only on a real
+   * offline -> online transition. No unconditional DB write, log, or push.
    */
   async registerDevice(deviceId: string, ws: WebSocket, deviceDoc: any): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
@@ -149,51 +159,33 @@ class DeviceSocketService {
 
     console.log(`[DEVICE-WS] Hardware connected: ${cleanId}`);
 
-    // Update MongoDB status to online with connection timestamp
-    const onlineBefore = deviceDoc.online === true;
-    const heartbeatBeforeAgeMs = ageMsOf(deviceDoc.lastHeartbeat, nowMs);
-    deviceDoc.online = true;
-    deviceDoc.lastHeartbeat = now;
-    deviceDoc.lastConnectedAt = now;
-    await deviceDoc.save().catch(() => { });
+    const before = devicePresenceService.getPresence(
+      cleanId,
+      deviceDoc.online,
+      deviceDoc.lastHeartbeat
+    );
+
+    // The presence authority decides whether this is a user-visible transition.
+    await devicePresenceService.noteSocketOpen(cleanId, deviceDoc);
+
+    const after = devicePresenceService.getPresence(cleanId);
 
     console.log(
       `[DEVICE-STATUS-TRACE] at=${now.toISOString()} register_device device=${cleanId} ` +
         `prevTracked=${Boolean(existing)} prevSocketAgeMs=${ageMsOf(existing?.lastHeartbeat, nowMs)} ` +
         `prevMissedPings=${existing?.missedPings ?? "null"} replacedLiveSocket=${replacedLiveSocket} ` +
-        `dbOnlineBefore=${onlineBefore} dbHeartbeatAgeBeforeMs=${heartbeatBeforeAgeMs} ` +
-        `transition=${onlineBefore ? "ONLINE_STAYED_ONLINE" : "OFFLINE_TO_ONLINE"} source=esp32_websocket`
+        `presenceBefore=${before.state} presenceAfter=${after.state} ` +
+        `transition=${before.online ? "ONLINE_STAYED_ONLINE" : "OFFLINE_TO_ONLINE"} origin=esp32_websocket`
     );
-
-    // Create persistent activity log record
-    await Log.create({
-      deviceId: deviceDoc._id,
-      action: "device_online",
-      timestamp: now,
-      metadata: { source: "esp32_websocket", deviceId: cleanId },
-    }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_online for ${cleanId}:`, err));
-
-    // Broadcast real-time online status to users & admins
-    const targets = [cleanId, deviceDoc._id, deviceDoc.ownerId, ...(deviceDoc.coOwners || [])];
-    wsService.broadcastToDeviceGroup(targets, {
-      type: "DEVICE_ONLINE",
-      deviceId: cleanId,
-      timestamp: now.toISOString(),
-    });
-    wsService.broadcastToDeviceGroup(targets, {
-      type: "DEVICE_STATUS",
-      deviceId: cleanId,
-      doorState: deviceDoc.doorState,
-      doorStatus: deviceDoc.doorState === "closed" ? "locked" : "unlocked",
-      online: true,
-    });
-
-    deviceNotificationService.handleDeviceOnline(deviceDoc);
   }
 
   /**
-   * Handles hardware disconnect event immediately.
-   * If a newer active socket already replaced this one or socket is already disconnected, stale socket close is ignored.
+   * Handles hardware disconnect.
+   *
+   * Phase 1: a closed socket is not an offline decision either. The presence
+   * authority keeps the device visible as online until the silence threshold
+   * expires, so the frequent reconnects this locker produces stay invisible.
+   * If a newer socket already replaced this one, the stale close is ignored.
    */
   async handleDisconnect(deviceId: string, ws?: WebSocket): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
@@ -205,59 +197,27 @@ class DeviceSocketService {
     }
 
     this.devices.delete(cleanId);
+    const disconnectTime = new Date();
+
+    console.log(
+      `[DEVICE-STATUS-TRACE] at=${disconnectTime.toISOString()} handle_disconnect device=${cleanId} ` +
+        `socketAgeMs=${ageMsOf(current.lastHeartbeat, disconnectTime.getTime())} ` +
+        `missedPings=${current.missedPings} socketState=${socketStateName(current.ws.readyState)} ` +
+        `presenceBefore=${devicePresenceService.getPresence(cleanId).state} ` +
+        `decision=HOLD_ONLINE_UNTIL_SILENCE origin=esp32_websocket_disconnect`
+    );
     console.log(`[DEVICE-WS] Hardware disconnected: ${cleanId}`);
 
-    try {
-      const disconnectTime = new Date();
-      // Atomic state transition: ONLY update and log if device was currently online (true -> false)
-      const device = await Device.findOneAndUpdate(
-        { deviceId: cleanId, online: true },
-        { $set: { online: false, lastDisconnectedAt: disconnectTime } },
-        { new: false }
-      );
-
-      console.log(
-        `[DEVICE-STATUS-TRACE] at=${disconnectTime.toISOString()} handle_disconnect device=${cleanId} ` +
-          `socketAgeMs=${ageMsOf(current.lastHeartbeat, disconnectTime.getTime())} ` +
-          `missedPings=${current.missedPings} socketState=${socketStateName(current.ws.readyState)} ` +
-          `dbOnlineBefore=${Boolean(device)} dbHeartbeatAgeMs=${ageMsOf(device?.lastHeartbeat, disconnectTime.getTime())} ` +
-          `transition=${device ? "ONLINE_TO_OFFLINE" : "ALREADY_OFFLINE_NOOP"} source=esp32_websocket_disconnect`
-      );
-
-      // If device was already offline, avoid duplicate audit log and broadcast!
-      if (!device) {
-        return;
-      }
-
-      await Log.create({
-        deviceId: device._id,
-        action: "device_offline",
-        timestamp: disconnectTime,
-        metadata: { source: "esp32_websocket_disconnect", deviceId: cleanId },
-      }).catch((err) => console.error(`[DEVICE-WS] Failed to log device_offline for ${cleanId}:`, err));
-
-      const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
-      wsService.broadcastToDeviceGroup(targets, {
-        type: "DEVICE_OFFLINE",
-        deviceId: cleanId,
-        timestamp: disconnectTime.toISOString(),
-      });
-      wsService.broadcastToDeviceGroup(targets, {
-        type: "DEVICE_STATUS",
-        deviceId: cleanId,
-        online: false,
-        doorState: device.doorState,
-      });
-
-      deviceNotificationService.scheduleOfflineNotification(device);
-    } catch (err) {
-      console.error(`[DEVICE-WS] Error handling disconnect for ${cleanId}:`, err);
-    }
+    await devicePresenceService.noteSocketClosed(cleanId);
   }
 
   /**
    * Records proof-of-life on ANY incoming frame (telemetry, door event, ping, pong, heartbeat).
    * Refreshes RAM heartbeat and resets missed ping count to prevent false ghost-socket drops.
+   *
+   * Phase 1: every frame is also fed to the presence authority, which owns the
+   * user-visible online status. This is the fix for defect A — the heartbeat
+   * path no longer has to write to MongoDB at all.
    */
   touchActivity(deviceId: string): void {
     const cleanId = deviceId.trim().toUpperCase();
@@ -266,6 +226,7 @@ class DeviceSocketService {
       conn.lastHeartbeat = new Date();
       conn.missedPings = 0;
     }
+    void devicePresenceService.noteFrame(cleanId);
   }
 
   /**
@@ -295,7 +256,12 @@ class DeviceSocketService {
 
   /**
    * Dead-socket sweeper: runs periodically (e.g. every 5s).
-   * Actively sends RFC 6455 Ping frames and terminates unresponsive ghost sockets after 25s–30s.
+   * Sends RFC 6455 Ping frames and terminates sockets that have been silent for
+   * longer than the ghost timeout.
+   *
+   * Phase 1: this is purely a *socket hygiene* routine. Terminating a ghost
+   * socket never changes the user-visible online status — the presence authority
+   * decides that from elapsed silence, using the same clock.
    */
   sweepConnections(): void {
     const now = Date.now();
@@ -304,15 +270,17 @@ class DeviceSocketService {
     for (const [cleanId, conn] of this.devices.entries()) {
       const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
 
-      // Ghost socket if device missed 5 consecutive pings (~25s) or total silence exceeds threshold (30s)
-      if (conn.missedPings >= 5 || timeSinceHeartbeat > ghostCutoffMs) {
+      // Time-only cutoff: a single silence window for both ghost reaping and
+      // presence confirmation, so the two can never disagree.
+      if (timeSinceHeartbeat > ghostCutoffMs) {
         console.log(
-          `[DEVICE-WS] Device ${cleanId} unresponsive for ${Math.round(timeSinceHeartbeat / 1000)}s (missed ${conn.missedPings} pings). Terminating ghost socket.`
+          `[DEVICE-WS] Device ${cleanId} silent for ${Math.round(timeSinceHeartbeat / 1000)}s ` +
+            `(missed ${conn.missedPings} pings, ghostTimeout=${Math.round(ghostCutoffMs / 1000)}s). Terminating ghost socket.`
         );
         try {
           conn.ws.terminate();
         } catch { }
-        this.handleDisconnect(cleanId, conn.ws);
+        void this.handleDisconnect(cleanId, conn.ws);
         continue;
       }
 
@@ -333,7 +301,12 @@ class DeviceSocketService {
 
   /**
    * Handles door state change telemetry from ESP32.
-   * Updates MongoDB cloud state as authoritative source of truth.
+   * Updates the door state in MongoDB and broadcasts it.
+   *
+   * Phase 1: this no longer writes `online = true` or `lastHeartbeat`. A door
+   * event is proof of life (fed through `touchActivity`), but the online flag
+   * and its broadcast come from the presence authority only — otherwise a
+   * cybersecurity-relevant "online" claim could be manufactured by telemetry.
    */
   async handleDoorEvent(deviceId: string, doorState: "open" | "closed"): Promise<void> {
     const cleanId = deviceId.trim().toUpperCase();
@@ -344,8 +317,6 @@ class DeviceSocketService {
 
     const previousState = device.doorState;
     device.doorState = doorState;
-    device.online = true;
-    device.lastHeartbeat = new Date();
     await device.save();
 
     if (previousState !== doorState) {
@@ -360,13 +331,19 @@ class DeviceSocketService {
       }
     }
 
+    const presence = devicePresenceService.getPresence(
+      cleanId,
+      device.online,
+      device.lastHeartbeat
+    );
+
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_STATUS",
       deviceId: cleanId,
       doorState,
       doorStatus: doorState === "closed" ? "locked" : "unlocked",
-      online: true,
+      online: presence.online,
     });
   }
 
@@ -411,6 +388,13 @@ class DeviceSocketService {
   getConnectionSnapshot(deviceId: string, nowMs: number = Date.now()): DeviceSocketSnapshot {
     const cleanId = (deviceId || "").trim().toUpperCase();
     const conn = this.devices.get(cleanId);
+    const presence = devicePresenceService.peek(cleanId);
+
+    const presenceFields = {
+      presenceState: presence?.state ?? null,
+      presencePublishedOnline: presence?.publishedOnline ?? null,
+      presenceSilenceMs: presence?.lastSeenAgeMs ?? null,
+    };
 
     if (!conn) {
       return {
@@ -424,6 +408,7 @@ class DeviceSocketService {
         isFresh: false,
         freshnessWindowMs: SOCKET_FRESHNESS_MS,
         ghostTimeoutMs: getGhostTimeoutMs(),
+        ...presenceFields,
       };
     }
 
@@ -443,6 +428,7 @@ class DeviceSocketService {
         lastActivityAgeMs < SOCKET_FRESHNESS_MS,
       freshnessWindowMs: SOCKET_FRESHNESS_MS,
       ghostTimeoutMs: getGhostTimeoutMs(),
+      ...presenceFields,
     };
   }
 

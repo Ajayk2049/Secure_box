@@ -4,15 +4,21 @@ import { Log } from "../models/Log.model.js";
 import { User } from "../models/User.model.js";
 import {
   deviceSocketService,
-  DB_HEARTBEAT_FALLBACK_MS,
   SOCKET_FRESHNESS_MS,
   getGhostTimeoutMs,
   type DeviceSocketSnapshot,
 } from "./deviceSocket.service.js";
+import { devicePresenceService, type PresenceView } from "./devicePresence.service.js";
 import { commandQueueService } from "./commandQueue.service.js";
 import { wsService } from "./websocket.service.js";
+import { config } from "../config.js";
 
-export type StatusDecisionPath = "socket_fresh" | "db_heartbeat_fallback" | "offline";
+/**
+ * Phase 1: `ram_presence` is the only live decision path. `db_fallback` means the
+ * device has no RAM record (e.g. after a restart) and the DB projection inside
+ * the restart window is all we have. `offline` is a confirmed offline.
+ */
+export type StatusDecisionPath = "ram_presence" | "db_fallback" | "offline";
 
 export interface DeviceStatusDebug {
   deviceId: string;
@@ -20,6 +26,8 @@ export interface DeviceStatusDebug {
   sampledAt: string;
   effectiveOnline: boolean;
   decisionPath: StatusDecisionPath;
+  /** Phase 1: the authority's own answer, verbatim. */
+  presence: PresenceView;
   db: {
     online: boolean;
     lastHeartbeat: string | null;
@@ -30,34 +38,36 @@ export interface DeviceStatusDebug {
   socket: DeviceSocketSnapshot;
   thresholds: {
     socketFreshnessMs: number;
-    dbHeartbeatFallbackMs: number;
+    suspectMs: number;
+    offlineMs: number;
+    persistMs: number;
+    restartFallbackMs: number;
     ghostTimeoutMs: number;
+    offlineGraceMs: number;
   };
   inconsistencies: string[];
 }
 
+function decisionPathFor(presence: PresenceView): StatusDecisionPath {
+  if (!presence.online) return "offline";
+  return presence.source === "ram" ? "ram_presence" : "db_fallback";
+}
+
 export class DeviceStatusService {
   /**
-   * Phase 0: single place that explains WHY a device is online or offline,
-   * including every input the decision consumed.
+   * Phase 1: a single call into the presence authority. No independent
+   * heuristics, no second clock, no DB-timestamp short-circuit.
    */
-  private evaluate(deviceId: string, dbOnline: boolean | undefined, lastHeartbeat: Date | string | null | undefined, nowMs: number) {
-    const socket = deviceSocketService.getConnectionSnapshot(deviceId, nowMs);
-    if (socket.isFresh) {
-      return { socket, path: "socket_fresh" as StatusDecisionPath, online: true };
-    }
-    if (dbOnline && lastHeartbeat) {
-      const hbTime = new Date(lastHeartbeat).getTime();
-      if (Number.isFinite(hbTime) && nowMs - hbTime < DB_HEARTBEAT_FALLBACK_MS) {
-        return { socket, path: "db_heartbeat_fallback" as StatusDecisionPath, online: true };
-      }
-    }
-    return { socket, path: "offline" as StatusDecisionPath, online: false };
+  private evaluate(
+    deviceId: string,
+    dbOnline: boolean | undefined,
+    lastHeartbeat: Date | string | null | undefined
+  ): PresenceView {
+    return devicePresenceService.getPresence(deviceId, dbOnline, lastHeartbeat);
   }
 
   /**
-   * Evaluates live online status: checks active hardware WebSocket first,
-   * falling back to the DB heartbeat window.
+   * Evaluates live online status. Returns the authority's answer.
    */
   resolveDeviceOnline(
     deviceId: string,
@@ -66,48 +76,51 @@ export class DeviceStatusService {
   ): boolean {
     if (!deviceId) return false;
     const cleanId = deviceId.trim().toUpperCase();
-    return this.evaluate(cleanId, dbOnline, lastHeartbeat, Date.now()).online;
+    return this.evaluate(cleanId, dbOnline, lastHeartbeat).online;
   }
 
   /**
-   * Phase 0: read-only diagnostic snapshot used by GET /devices/:id/status-debug.
-   * Reports each producer's value plus the inconsistencies between them.
+   * Phase 0/1: read-only diagnostic snapshot used by GET /devices/:id/status-debug.
+   * Reports the authority's answer, each producer's raw value, and the
+   * inconsistencies between them.
    */
   buildStatusDebug(device: any, nowMs = Date.now()): DeviceStatusDebug {
     const cleanId = String(device.deviceId || "").trim().toUpperCase();
     const dbOnline = device.online === true;
-    const evaluated = this.evaluate(cleanId, dbOnline, device.lastHeartbeat, nowMs);
-    const socket = evaluated.socket;
+    const presence = this.evaluate(cleanId, dbOnline, device.lastHeartbeat);
+    const socket = deviceSocketService.getConnectionSnapshot(cleanId, nowMs);
     const heartbeatAgeMs = device.lastHeartbeat
       ? nowMs - new Date(device.lastHeartbeat).getTime()
       : null;
     const ghostTimeoutMs = getGhostTimeoutMs();
 
     const inconsistencies: string[] = [];
-    if (!dbOnline && socket.isFresh) {
-      inconsistencies.push("db_offline_but_socket_fresh");
+    if (!dbOnline && presence.online) {
+      inconsistencies.push("presence_online_but_db_offline");
     }
-    if (dbOnline && socket.isFresh && (heartbeatAgeMs === null || heartbeatAgeMs >= DB_HEARTBEAT_FALLBACK_MS)) {
-      inconsistencies.push("db_heartbeat_stale_while_socket_active");
+    if (dbOnline && !presence.online) {
+      inconsistencies.push("presence_offline_but_db_online");
     }
-    if (dbOnline && !socket.isFresh && (heartbeatAgeMs === null || heartbeatAgeMs >= ghostTimeoutMs)) {
-      inconsistencies.push("db_online_but_no_evidence");
+    if (dbOnline && presence.online && (heartbeatAgeMs === null || heartbeatAgeMs > config.deviceHeartbeatPersistSec * 1000)) {
+      inconsistencies.push("db_heartbeat_stale_but_presence_online");
     }
     if (socket.tracked && socket.state !== "OPEN") {
       inconsistencies.push("socket_tracked_but_not_open");
     }
-    if (evaluated.online !== dbOnline) {
-      inconsistencies.push(
-        evaluated.online ? "effective_online_but_db_offline" : "effective_offline_but_db_online"
-      );
+    if (socket.tracked && !socket.isFresh && presence.online) {
+      inconsistencies.push("socket_silent_but_presence_online");
+    }
+    if (!socket.tracked && presence.source === "untracked") {
+      inconsistencies.push("no_ram_record_since_boot");
     }
 
     return {
       deviceId: cleanId,
       name: device.name ?? null,
       sampledAt: new Date(nowMs).toISOString(),
-      effectiveOnline: evaluated.online,
-      decisionPath: evaluated.path,
+      effectiveOnline: presence.online,
+      decisionPath: decisionPathFor(presence),
+      presence,
       db: {
         online: dbOnline,
         lastHeartbeat: device.lastHeartbeat ? new Date(device.lastHeartbeat).toISOString() : null,
@@ -118,8 +131,12 @@ export class DeviceStatusService {
       socket,
       thresholds: {
         socketFreshnessMs: SOCKET_FRESHNESS_MS,
-        dbHeartbeatFallbackMs: DB_HEARTBEAT_FALLBACK_MS,
+        suspectMs: config.devicePresenceSuspectSec * 1000,
+        offlineMs: config.devicePresenceOfflineSec * 1000,
+        persistMs: config.deviceHeartbeatPersistSec * 1000,
+        restartFallbackMs: config.deviceRestartFallbackSec * 1000,
         ghostTimeoutMs,
+        offlineGraceMs: config.deviceOfflineGracePeriodSec * 1000,
       },
       inconsistencies,
     };

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { config } from "./config.js";
 import { checkDeviceWatchdog } from "./services/deviceWatchdog.service.js";
 import { deviceNotificationService } from "./services/deviceNotification.service.js";
+import { devicePresenceService } from "./services/devicePresence.service.js";
 import { wsService } from "./services/websocket.service.js";
 import { deviceStatusService } from "./services/deviceStatus.service.js";
 import { User } from "./models/User.model.js";
@@ -356,8 +357,13 @@ async function bootstrap() {
   await User.collection.dropIndex("email_1").catch(() => {});
   await User.syncIndexes().catch(() => {});
 
-  // Start periodic watchdog timer for IoT device connectivity (runs every 5s for rapid, non-destructive offline detection)
+  // Start periodic watchdog timer for IoT device connectivity. Phase 1: this
+  // only reaps ghost sockets and catches devices with no RAM record; it never
+  // decides user-visible online status (devicePresenceService owns that).
   const watchdogInterval = setInterval(checkDeviceWatchdog, (config.deviceWatchdogIntervalSec || 5) * 1000);
+
+  // Phase 1: batched DB projection of RAM presence (never per-heartbeat writes).
+  devicePresenceService.startFlusher();
   // Rotate and prune logs on startup and periodically every 15 minutes (hourly rotation & 25 MB size cap check)
   pruneLogsOlderThan24Hours().catch(() => {});
   const logPruneInterval = setInterval(() => {
@@ -372,6 +378,7 @@ async function bootstrap() {
     fastify.log.info(`[SHUTDOWN] Received ${signal}. Draining requests and closing connections cleanly...`);
     clearInterval(watchdogInterval);
     clearInterval(logPruneInterval);
+    devicePresenceService.stopFlusher();
     deviceNotificationService.clearAllTimers();
     try {
       await fastify.close();
