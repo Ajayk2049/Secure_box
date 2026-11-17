@@ -72,6 +72,40 @@ for (const c of cases) {
 }
 
 // ---------------------------------------------------------------------------
+// 1b. Tick-based hysteresis (Phase 2)
+// ---------------------------------------------------------------------------
+section("1b. Tick-based hysteresis (2-tick confirmation)");
+
+const HYSTERESIS_TIMING: PresenceTiming = { suspectMs: 25_000, offlineMs: 90_000, requiredOfflineTicks: 2 };
+
+check(
+  "tick 1 exceeding offlineMs stays suspect",
+  nextPresenceState(
+    { previous: "suspect", socketOpen: false, lastSeenAgeMs: 95_000, consecutiveOfflineTicks: 1 },
+    HYSTERESIS_TIMING
+  ),
+  "suspect"
+);
+
+check(
+  "tick 2 exceeding offlineMs confirms offline",
+  nextPresenceState(
+    { previous: "suspect", socketOpen: false, lastSeenAgeMs: 100_000, consecutiveOfflineTicks: 2 },
+    HYSTERESIS_TIMING
+  ),
+  "offline"
+);
+
+check(
+  "recovery at tick 1 returns immediately to online upon frame",
+  nextPresenceState(
+    { previous: "suspect", socketOpen: true, lastSeenAgeMs: 100, consecutiveOfflineTicks: 0 },
+    HYSTERESIS_TIMING
+  ),
+  "online"
+);
+
+// ---------------------------------------------------------------------------
 // 2. Visibility contract: suspect is never published as offline
 // ---------------------------------------------------------------------------
 section("2. Visibility contract");

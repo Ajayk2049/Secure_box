@@ -37,6 +37,13 @@ class DeviceNotificationService {
       this.pendingOfflineTimers.delete(cleanId);
 
       try {
+        const { devicePresenceService } = await import("./devicePresence.service.js");
+        const presence = devicePresenceService.getPresence(cleanId);
+        if (presence.online) {
+          console.log(`[FCM-GRACE] Device ${cleanId} is online in presence authority. Suppressed offline notification.`);
+          return;
+        }
+
         // Query fresh device record from MongoDB to verify continuous offline status
         const currentDev = await Device.findOne({ deviceId: cleanId });
         if (currentDev && currentDev.online === false) {

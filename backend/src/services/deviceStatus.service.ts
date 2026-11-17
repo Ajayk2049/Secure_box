@@ -67,6 +67,19 @@ export class DeviceStatusService {
   }
 
   /**
+   * Evaluates live presence view. Returns the authority's complete answer.
+   */
+  getDevicePresence(
+    deviceId: string,
+    dbOnline?: boolean,
+    lastHeartbeat?: Date | string | null
+  ): PresenceView {
+    if (!deviceId) return devicePresenceService.getPresence("");
+    const cleanId = deviceId.trim().toUpperCase();
+    return this.evaluate(cleanId, dbOnline, lastHeartbeat);
+  }
+
+  /**
    * Evaluates live online status. Returns the authority's answer.
    */
   resolveDeviceOnline(
@@ -145,15 +158,17 @@ export class DeviceStatusService {
   /**
    * Enriches a device object with verified real-time online status.
    */
-  enrichWithLiveStatus<T extends Record<string, any>>(deviceObj: T): T & { online: boolean } {
-    const isOnline = this.resolveDeviceOnline(
+  enrichWithLiveStatus<T extends Record<string, any>>(deviceObj: T): T & { online: boolean; statusVersion?: number; lastSeen?: string | null } {
+    const presence = this.getDevicePresence(
       deviceObj.deviceId,
       deviceObj.online,
       deviceObj.lastHeartbeat
     );
     return {
       ...deviceObj,
-      online: isOnline,
+      online: presence.online,
+      statusVersion: presence.statusVersion,
+      lastSeen: presence.lastSeenAt ? new Date(presence.lastSeenAt).toISOString() : null,
     };
   }
 

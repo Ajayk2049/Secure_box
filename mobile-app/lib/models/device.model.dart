@@ -6,6 +6,8 @@ class DeviceModel {
   final bool online;
   final bool isOwner;
   final String userRole;
+  final int? statusVersion;
+  final DateTime? lastSeen;
 
   DeviceModel({
     required this.id,
@@ -15,11 +17,22 @@ class DeviceModel {
     required this.online,
     this.isOwner = false,
     this.userRole = 'Co-Owner',
+    this.statusVersion,
+    this.lastSeen,
   });
 
   factory DeviceModel.fromJson(Map<String, dynamic> json) {
     final bool rawIsOwner = json['isOwner'] == true;
     final String rawUserRole = json['userRole']?.toString() ?? (rawIsOwner ? 'Owner' : 'Co-Owner');
+    final rawVersion = json['statusVersion'];
+    final int? parsedVersion = rawVersion is int
+        ? rawVersion
+        : (rawVersion != null ? int.tryParse(rawVersion.toString()) : null);
+    final rawLastSeen = json['lastSeen'] ?? json['lastHeartbeat'];
+    final DateTime? parsedLastSeen = rawLastSeen != null
+        ? DateTime.tryParse(rawLastSeen.toString())
+        : null;
+
     return DeviceModel(
       id: json['_id'] ?? json['id'] ?? '',
       deviceId: json['deviceId'] ?? '',
@@ -28,6 +41,8 @@ class DeviceModel {
       online: json['online'] ?? false,
       isOwner: rawIsOwner,
       userRole: rawUserRole,
+      statusVersion: parsedVersion,
+      lastSeen: parsedLastSeen,
     );
   }
 
@@ -39,6 +54,8 @@ class DeviceModel {
     bool? online,
     bool? isOwner,
     String? userRole,
+    int? statusVersion,
+    DateTime? lastSeen,
   }) {
     return DeviceModel(
       id: id ?? this.id,
@@ -48,6 +65,8 @@ class DeviceModel {
       online: online ?? this.online,
       isOwner: isOwner ?? this.isOwner,
       userRole: userRole ?? this.userRole,
+      statusVersion: statusVersion ?? this.statusVersion,
+      lastSeen: lastSeen ?? this.lastSeen,
     );
   }
 
@@ -60,6 +79,8 @@ class DeviceModel {
       'online': online,
       'isOwner': isOwner,
       'userRole': userRole,
+      'statusVersion': statusVersion,
+      'lastSeen': lastSeen?.toIso8601String(),
     };
   }
 }

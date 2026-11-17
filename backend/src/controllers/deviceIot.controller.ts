@@ -5,7 +5,7 @@ import { Log } from "../models/Log.model.js";
 import { User } from "../models/User.model.js";
 import { commandQueueService } from "../services/commandQueue.service.js";
 import { wsService } from "../services/websocket.service.js";
-import { deviceSocketService } from "../services/deviceSocket.service.js";
+import { devicePresenceService } from "../services/devicePresence.service.js";
 import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 export { checkDeviceWatchdog } from "../services/deviceWatchdog.service.js";
 
@@ -53,6 +53,7 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
 
   const wasOffline = !device.online;
   const now = Date.now();
+  devicePresenceService.noteFrame(targetId, "iot_poll");
   const lastHeartbeatTime = device.lastHeartbeat ? new Date(device.lastHeartbeat).getTime() : 0;
   // Throttle MongoDB writes: only save if status changed or >30 seconds elapsed
   if (wasOffline || now - lastHeartbeatTime > 30000) {
@@ -64,8 +65,10 @@ export async function getDeviceCommand(request: FastifyRequest, reply: FastifyRe
   if (wasOffline) {
     const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
     const doorStatus = device.doorState === "closed" ? "locked" : "unlocked";
-    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_STATUS", deviceId: targetId, doorState: device.doorState, doorStatus, online: true });
-    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_ONLINE", deviceId: targetId });
+    const version = devicePresenceService.nextStatusVersion(targetId);
+    const nowIso = new Date(now).toISOString();
+    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_STATUS", deviceId: targetId, doorState: device.doorState, doorStatus, online: true, statusVersion: version, lastSeen: nowIso });
+    wsService.broadcastToDeviceGroup(targets, { type: "DEVICE_ONLINE", deviceId: targetId, statusVersion: version, lastSeen: nowIso });
   }
 
   const pending = commandQueueService.popPendingCommand(targetId);
@@ -107,13 +110,8 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
     .trim()
     .toLowerCase();
 
-  if (!targetId) {
-    return reply.status(400).send({ error: "deviceId is required" });
-  }
+  if (!targetId) return reply.status(400).send({ error: "deviceId is required" });
 
-  // Normalize flexible status inputs:
-  // "locked", "lock", "closed", "close", "shut" -> "closed"
-  // "unlocked", "unlock", "open", "opened", "ajar" -> "open"
   let normalizedDoorState: "open" | "closed" | null = null;
   if (["closed", "close", "locked", "lock", "shut"].includes(rawStatus)) {
     normalizedDoorState = "closed";
@@ -132,19 +130,24 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
   if (!device) return reply.status(404).send({ error: `Device '${targetId}' not registered` });
   if (!isDeviceAuthorized(device, request)) return reply.status(401).send({ error: "Unauthorized: Invalid or missing X-Device-Key" });
 
+  devicePresenceService.noteFrame(targetId, "iot_telemetry");
+  const version = devicePresenceService.nextStatusVersion(targetId);
+  const nowIso = new Date().toISOString();
   device.doorState = normalizedDoorState;
   device.online = true;
   device.lastHeartbeat = new Date();
+  device.statusVersion = version;
   await device.save();
 
   const doorStatus = normalizedDoorState === "closed" ? "locked" : "unlocked";
-
   const statusMsg = {
     type: "DEVICE_STATUS",
     deviceId: targetId,
     doorState: normalizedDoorState,
     doorStatus,
     online: true,
+    statusVersion: version,
+    lastSeen: nowIso,
   };
   const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
   wsService.broadcastToDeviceGroup(targets, statusMsg);
@@ -153,13 +156,7 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
     await Log.create({
       deviceId: device._id,
       action: "lock",
-      metadata: {
-        event: "door_locked",
-        source: "physical_sensor",
-        userName: "Mechanical Latch",
-        userRole: "Auto / Sensor",
-        deviceId: device.deviceId,
-      },
+      metadata: { event: "door_locked", source: "physical_sensor", userName: "Mechanical Latch", userRole: "Auto / Sensor", deviceId: device.deviceId },
     });
 
     const deliveryMsg = {
@@ -168,6 +165,8 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
       doorState: "closed",
       doorStatus: "locked",
       online: true,
+      statusVersion: version,
+      lastSeen: nowIso,
     };
     wsService.broadcastToDeviceGroup(targets, deliveryMsg);
   } else {

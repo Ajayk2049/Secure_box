@@ -39,10 +39,12 @@ export async function getDevices(request: FastifyRequest, reply: FastifyReply) {
     delete (obj as any).deviceKeyHash;
     const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
     const isOwner = Boolean(userId && ownerIdStr && ownerIdStr === userId);
-    const isActuallyOnline = deviceStatusService.resolveDeviceOnline(d.deviceId, d.online, d.lastHeartbeat);
+    const presence = deviceStatusService.getDevicePresence(d.deviceId, d.online, d.lastHeartbeat);
     return {
       ...obj,
-      online: isActuallyOnline,
+      online: presence.online,
+      statusVersion: presence.statusVersion,
+      lastSeen: presence.lastSeenAt ? new Date(presence.lastSeenAt).toISOString() : null,
       isOwner,
       userRole: isOwner ? "Owner" : "Co-Owner",
     };
@@ -326,6 +328,7 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
   device.name = name.trim();
   await device.save();
 
+  const presence = deviceStatusService.getDevicePresence(device.deviceId, device.online, device.lastHeartbeat);
   return reply.send({
     success: true,
     message: "Device renamed successfully",
@@ -333,7 +336,9 @@ export async function updateDeviceName(request: FastifyRequest, reply: FastifyRe
       id: device._id,
       deviceId: device.deviceId,
       name: device.name,
-      online: deviceStatusService.resolveDeviceOnline(device.deviceId, device.online, device.lastHeartbeat),
+      online: presence.online,
+      statusVersion: presence.statusVersion,
+      lastSeen: presence.lastSeenAt ? new Date(presence.lastSeenAt).toISOString() : null,
       doorState: device.doorState,
     },
   });

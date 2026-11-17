@@ -331,6 +331,7 @@ class DeviceSocketService {
       }
     }
 
+    const version = devicePresenceService.nextStatusVersion(cleanId);
     const presence = devicePresenceService.getPresence(
       cleanId,
       device.online,
@@ -338,12 +339,18 @@ class DeviceSocketService {
     );
 
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
+    const lastSeenStr = presence.lastSeenAt
+      ? new Date(presence.lastSeenAt).toISOString()
+      : new Date().toISOString();
+
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_STATUS",
       deviceId: cleanId,
       doorState,
       doorStatus: doorState === "closed" ? "locked" : "unlocked",
       online: presence.online,
+      statusVersion: version,
+      lastSeen: lastSeenStr,
     });
   }
 

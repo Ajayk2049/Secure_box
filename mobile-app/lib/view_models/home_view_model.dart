@@ -19,6 +19,7 @@ class HomeViewModel extends ChangeNotifier {
   StreamSubscription<String>? _sessionExpirySub;
   StreamSubscription<Map<String, dynamic>>? _wsMessageSub;
   final Map<String, DateTime> _recentlyUnlockedUntil = {};
+  final Map<String, Timer> _tentativeOfflineTimers = {};
 
   List<DeviceModel> _devices = [];
   List<LogModel> _logs = [];
@@ -144,7 +145,7 @@ class HomeViewModel extends ChangeNotifier {
       final newDevices = rawList.map((json) => DeviceModel.fromJson(json)).toList();
       _cacheManager.saveCachedDevices(rawList);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
-      _devices = updatedDevices;
+      _devices = _reconcileWithCurrentState(updatedDevices);
       _loading = false;
       notifyListeners();
       return;
@@ -181,11 +182,66 @@ class HomeViewModel extends ChangeNotifier {
         ? true
         : (type == 'DEVICE_OFFLINE' ? false : message['online'] as bool?);
 
+    final rawVersion = message['statusVersion'];
+    final int? incomingVersion = rawVersion is int
+        ? rawVersion
+        : (rawVersion != null ? int.tryParse(rawVersion.toString()) : null);
+    final rawLastSeen = message['lastSeen'] ?? message['lastHeartbeat'];
+    final DateTime? incomingLastSeen = rawLastSeen != null
+        ? DateTime.tryParse(rawLastSeen.toString())
+        : null;
+
     final idx = _devices.indexWhere((d) => _matchesDevice(d, targetUpper));
     if (idx != -1) {
-      _devices[idx] = _devices[idx].copyWith(
-        doorState: newDoorState ?? _devices[idx].doorState,
-        online: isOnline ?? _devices[idx].online,
+      final current = _devices[idx];
+
+      // Discard stale or out-of-order events
+      if (incomingVersion != null && current.statusVersion != null && incomingVersion < current.statusVersion!) {
+        return;
+      }
+      if (incomingVersion == null && incomingLastSeen != null && current.lastSeen != null && incomingLastSeen.isBefore(current.lastSeen!)) {
+        return;
+      }
+
+      bool resolvedOnline = current.online;
+      if (isOnline == true) {
+        _tentativeOfflineTimers[targetUpper]?.cancel();
+        _tentativeOfflineTimers.remove(targetUpper);
+        resolvedOnline = true;
+      } else if (isOnline == false) {
+        if (!current.online) {
+          resolvedOnline = false;
+        } else {
+          // If device silence is already aged >= 45s, declare offline immediately
+          final ageSeconds = incomingLastSeen != null
+              ? DateTime.now().toUtc().difference(incomingLastSeen.toUtc()).inSeconds
+              : 0;
+          if (ageSeconds >= 45) {
+            _tentativeOfflineTimers[targetUpper]?.cancel();
+            _tentativeOfflineTimers.remove(targetUpper);
+            resolvedOnline = false;
+          } else {
+            // Tentative offline dampening: hold current online status for grace window
+            if (!_tentativeOfflineTimers.containsKey(targetUpper)) {
+              _tentativeOfflineTimers[targetUpper] = Timer(const Duration(seconds: 10), () {
+                _tentativeOfflineTimers.remove(targetUpper);
+                final curIdx = _devices.indexWhere((d) => _matchesDevice(d, targetUpper));
+                if (curIdx != -1 && _devices[curIdx].online) {
+                  _devices[curIdx] = _devices[curIdx].copyWith(online: false);
+                  notifyListeners();
+                }
+              });
+            }
+            resolvedOnline = true;
+          }
+        }
+      }
+
+      _devices[idx] = current.copyWith(
+        doorState: newDoorState ?? current.doorState,
+        online: resolvedOnline,
+        statusVersion: incomingVersion ?? current.statusVersion,
+        lastSeen: incomingLastSeen ?? current.lastSeen,
       );
       notifyListeners();
     } else {
@@ -218,9 +274,10 @@ class HomeViewModel extends ChangeNotifier {
 
       _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+      final reconciledDevices = _reconcileWithCurrentState(updatedDevices);
 
-      if (_cacheManager.haveDevicesChanged(_devices, updatedDevices)) {
-        _devices = updatedDevices;
+      if (_cacheManager.haveDevicesChanged(_devices, reconciledDevices)) {
+        _devices = reconciledDevices;
         for (final d in _devices) {
           _ws.joinRoom(d.id);
           _ws.joinRoom(d.deviceId);
@@ -506,6 +563,23 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  List<DeviceModel> _reconcileWithCurrentState(List<DeviceModel> freshList) {
+    return freshList.map((fresh) {
+      final curIdx = _devices.indexWhere((c) => _matchesDevice(c, fresh.deviceId.toUpperCase()));
+      if (curIdx == -1) return fresh;
+      final cur = _devices[curIdx];
+      // Guard against REST poll or bulk updates overwriting newer WebSocket state
+      if (cur.statusVersion != null && fresh.statusVersion != null && fresh.statusVersion! < cur.statusVersion!) {
+        return fresh.copyWith(
+          online: cur.online,
+          statusVersion: cur.statusVersion,
+          lastSeen: cur.lastSeen,
+        );
+      }
+      return fresh;
+    }).toList();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();
@@ -514,6 +588,10 @@ class HomeViewModel extends ChangeNotifier {
   void reset() {
     _pollTimer?.cancel();
     _pollTimer = null;
+    for (final timer in _tentativeOfflineTimers.values) {
+      timer.cancel();
+    }
+    _tentativeOfflineTimers.clear();
     _isInitialized = false;
     _devices = [];
     _logs = [];
@@ -531,6 +609,10 @@ class HomeViewModel extends ChangeNotifier {
     _sessionExpirySub?.cancel();
     _wsMessageSub?.cancel();
     _pollTimer?.cancel();
+    for (final timer in _tentativeOfflineTimers.values) {
+      timer.cancel();
+    }
+    _tentativeOfflineTimers.clear();
     _ws.dispose();
     super.dispose();
   }

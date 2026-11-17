@@ -75,7 +75,8 @@ class DeviceCacheManager {
           current[i].doorState != fresh[i].doorState ||
           current[i].name != fresh[i].name ||
           current[i].isOwner != fresh[i].isOwner ||
-          current[i].userRole != fresh[i].userRole) {
+          current[i].userRole != fresh[i].userRole ||
+          current[i].statusVersion != fresh[i].statusVersion) {
         return true;
       }
     }

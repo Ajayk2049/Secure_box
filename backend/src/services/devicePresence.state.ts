@@ -18,6 +18,8 @@ export interface PresenceTiming {
   suspectMs: number;
   /** Silence after which the device is confirmed offline and published. */
   offlineMs: number;
+  /** Number of consecutive confirmation ticks required before declaring offline (default 2). */
+  requiredOfflineTicks?: number;
 }
 
 export interface PresenceInput {
@@ -26,14 +28,16 @@ export interface PresenceInput {
   socketOpen: boolean;
   /** Age of the last observed frame, in ms. `null` means "never observed". */
   lastSeenAgeMs: number | null;
+  /** Number of consecutive ticks the device has been observed exceeding the offline threshold. */
+  consecutiveOfflineTicks?: number;
 }
 
 /**
- * State is a pure function of elapsed silence. A socket that exists but is
+ * State is a pure function of elapsed silence and confirmation ticks. A socket that exists but is
  * silent is *not* proof of life, which is the defect this replaces.
  */
 export function nextPresenceState(input: PresenceInput, timing: PresenceTiming): PresenceState {
-  const { previous, socketOpen, lastSeenAgeMs } = input;
+  const { previous, socketOpen, lastSeenAgeMs, consecutiveOfflineTicks } = input;
 
   if (lastSeenAgeMs === null || !Number.isFinite(lastSeenAgeMs)) {
     // No evidence at all. A socket without a single frame is not enough.
@@ -41,7 +45,16 @@ export function nextPresenceState(input: PresenceInput, timing: PresenceTiming):
     return socketOpen ? "suspect" : "offline";
   }
 
-  if (lastSeenAgeMs >= timing.offlineMs) return "offline";
+  const requiredTicks = timing.requiredOfflineTicks ?? 1;
+  const ticks = consecutiveOfflineTicks ?? requiredTicks;
+
+  if (lastSeenAgeMs >= timing.offlineMs) {
+    if (ticks >= requiredTicks) {
+      return "offline";
+    }
+    return "suspect";
+  }
+
   if (lastSeenAgeMs < timing.suspectMs) return "online";
   return "suspect";
 }

@@ -9,6 +9,7 @@ export interface IDevice extends Document {
   name: string;
   doorState: "open" | "closed";
   online: boolean;
+  statusVersion?: number;
   lastHeartbeat?: Date;
   lastConnectedAt?: Date;
   lastDisconnectedAt?: Date;
@@ -64,6 +65,10 @@ const deviceSchema = new Schema<IDevice>(
     online: {
       type: Boolean,
       default: false,
+    },
+    statusVersion: {
+      type: Number,
+      default: 1,
     },
     lastHeartbeat: {
       type: Date,

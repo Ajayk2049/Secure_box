@@ -45,6 +45,8 @@ export interface PresenceView {
   /** Milliseconds until a `suspect` device is confirmed offline. */
   confirmInMs: number | null;
   socketOpen: boolean;
+  statusVersion: number;
+  lastSeenAt: Date | string | null;
 }
 
 export interface PresencePeek {
@@ -53,6 +55,7 @@ export interface PresencePeek {
   socketOpen: boolean;
   lastSeenAgeMs: number | null;
   lastSeenAt: string;
+  statusVersion: number;
 }
 
 interface PresenceRecord {
@@ -64,6 +67,8 @@ interface PresenceRecord {
   lastSeenAt: Date;
   confirmTimer: NodeJS.Timeout | null;
   lastOrigin: PresenceOrigin | null;
+  statusVersion: number;
+  consecutiveOfflineTicks: number;
 }
 
 const FLUSH_CHUNK_SIZE = 500;
@@ -98,6 +103,7 @@ class DevicePresenceService {
     return {
       suspectMs: config.devicePresenceSuspectSec * 1000,
       offlineMs: config.devicePresenceOfflineSec * 1000,
+      requiredOfflineTicks: 2,
     };
   }
 
@@ -118,6 +124,7 @@ class DevicePresenceService {
     record.lastSeenMonotonicMs = nowMonotonic();
     record.lastSeenAt = new Date();
     record.socketOpen = true;
+    record.consecutiveOfflineTicks = 0;
     this.stats.frames += 1;
 
     await this.reconcile(cleanId, origin, deviceDoc);
@@ -156,19 +163,40 @@ class DevicePresenceService {
     if (cleanId) {
       const record = this.records.get(cleanId);
       if (record) {
-        const ageMs = this.ageOf(record);
+        // Phase 2: reconcile effectiveLastSeen = max(RAM lastSeenAt, DB lastHeartbeat)
+        let effectiveAgeMs = this.ageOf(record);
+        if (dbLastHeartbeat) {
+          const dbMs = new Date(dbLastHeartbeat).getTime();
+          if (Number.isFinite(dbMs)) {
+            const dbAge = Math.max(0, Date.now() - dbMs);
+            if (dbAge < effectiveAgeMs) {
+              effectiveAgeMs = dbAge;
+              record.lastSeenAt = new Date(dbMs);
+              record.lastSeenMonotonicMs = nowMonotonic() - dbAge;
+              record.consecutiveOfflineTicks = 0;
+            }
+          }
+        }
+
         const state = nextPresenceState(
-          { previous: record.state, socketOpen: record.socketOpen, lastSeenAgeMs: ageMs },
+          {
+            previous: record.state,
+            socketOpen: record.socketOpen,
+            lastSeenAgeMs: effectiveAgeMs,
+            consecutiveOfflineTicks: record.consecutiveOfflineTicks,
+          },
           this.timing
         );
         const online = isPresenceVisibleOnline(state);
         return {
           state,
           online,
-          lastSeenAgeMs: Number.isFinite(ageMs) ? ageMs : null,
+          lastSeenAgeMs: Number.isFinite(effectiveAgeMs) ? effectiveAgeMs : null,
           source: "ram",
-          confirmInMs: online ? msUntilConfirmedOffline(ageMs, this.timing) : null,
+          confirmInMs: online ? msUntilConfirmedOffline(effectiveAgeMs, this.timing) : null,
           socketOpen: record.socketOpen,
+          statusVersion: record.statusVersion || 1,
+          lastSeenAt: record.lastSeenAt,
         };
       }
     }
@@ -188,6 +216,8 @@ class DevicePresenceService {
       source: hasDbEvidence ? "db_fallback" : "untracked",
       confirmInMs: null,
       socketOpen: false,
+      statusVersion: 1,
+      lastSeenAt: dbLastHeartbeat ? new Date(dbLastHeartbeat) : null,
     };
   }
 
@@ -199,7 +229,12 @@ class DevicePresenceService {
     const ageMs = this.ageOf(record);
     // Live-computed so diagnostics never report a stale stored state.
     const state = nextPresenceState(
-      { previous: record.state, socketOpen: record.socketOpen, lastSeenAgeMs: ageMs },
+      {
+        previous: record.state,
+        socketOpen: record.socketOpen,
+        lastSeenAgeMs: ageMs,
+        consecutiveOfflineTicks: record.consecutiveOfflineTicks,
+      },
       this.timing
     );
     return {
@@ -208,6 +243,7 @@ class DevicePresenceService {
       socketOpen: record.socketOpen,
       lastSeenAgeMs: Number.isFinite(ageMs) ? ageMs : null,
       lastSeenAt: record.lastSeenAt.toISOString(),
+      statusVersion: record.statusVersion || 1,
     };
   }
 
@@ -234,6 +270,13 @@ class DevicePresenceService {
     return next;
   }
 
+  nextStatusVersion(cleanId: string): number {
+    const record = this.records.get(cleanId);
+    if (!record) return 1;
+    record.statusVersion = (record.statusVersion || 0) + 1;
+    return record.statusVersion;
+  }
+
   private async reconcileNow(
     cleanId: string,
     origin: PresenceOrigin,
@@ -242,10 +285,37 @@ class DevicePresenceService {
     const record = this.records.get(cleanId);
     if (!record) return;
 
-    const ageMs = this.ageOf(record);
+    let ageMs = this.ageOf(record);
+
+    // Phase 2: reconcile with deviceDoc if DB has fresher timestamp
+    if (deviceDoc?.lastHeartbeat) {
+      const dbMs = new Date(deviceDoc.lastHeartbeat).getTime();
+      if (Number.isFinite(dbMs)) {
+        const dbAge = Math.max(0, Date.now() - dbMs);
+        if (dbAge < ageMs) {
+          ageMs = dbAge;
+          record.lastSeenAt = new Date(dbMs);
+          record.lastSeenMonotonicMs = nowMonotonic() - dbAge;
+          record.consecutiveOfflineTicks = 0;
+        }
+      }
+    }
+
+    // Phase 2: Hysteresis tick evaluation
+    if (ageMs >= this.timing.offlineMs) {
+      record.consecutiveOfflineTicks = (record.consecutiveOfflineTicks || 0) + 1;
+    } else {
+      record.consecutiveOfflineTicks = 0;
+    }
+
     const previousState = record.state;
     const nextState = nextPresenceState(
-      { previous: previousState, socketOpen: record.socketOpen, lastSeenAgeMs: ageMs },
+      {
+        previous: previousState,
+        socketOpen: record.socketOpen,
+        lastSeenAgeMs: ageMs,
+        consecutiveOfflineTicks: record.consecutiveOfflineTicks,
+      },
       this.timing
     );
     record.state = nextState;
@@ -299,7 +369,15 @@ class DevicePresenceService {
     if (record.confirmTimer) return; // already counting down to the same deadline
     if (record.state === "offline") return;
 
-    const delayMs = msUntilConfirmedOffline(this.ageOf(record), this.timing) + 50;
+    let delayMs = msUntilConfirmedOffline(this.ageOf(record), this.timing) + 50;
+    // Phase 2: If silence already crossed offlineMs but waiting for consecutive confirmation tick (5s)
+    if (
+      this.ageOf(record) >= this.timing.offlineMs &&
+      (record.consecutiveOfflineTicks || 0) < (this.timing.requiredOfflineTicks ?? 2)
+    ) {
+      delayMs = 5000;
+    }
+
     const timer = setTimeout(() => {
       record.confirmTimer = null;
       void this.reconcile(cleanId, "watchdog_timeout");
@@ -323,6 +401,7 @@ class DevicePresenceService {
     if (!record) return;
     record.publishedOnline = false;
     this.stats.offlineConfirmed += 1;
+    const version = this.nextStatusVersion(cleanId);
 
     const now = new Date();
     const roundedSilenceMs = Number.isFinite(silenceMs) ? Math.round(silenceMs) : null;
@@ -334,7 +413,7 @@ class DevicePresenceService {
       try {
         const updated = await Device.findOneAndUpdate(
           { deviceId: cleanId, online: true },
-          { $set: { online: false, lastDisconnectedAt: now } }
+          { $set: { online: false, lastDisconnectedAt: now, statusVersion: version } }
         )
           .lean()
           .exec();
@@ -352,7 +431,7 @@ class DevicePresenceService {
 
     console.log(
       `[PRESENCE-TRACE] at=${now.toISOString()} confirm_offline device=${cleanId} origin=${origin} ` +
-        `silenceMs=${roundedSilenceMs ?? "null"} db_flipped=${flipped}`
+        `silenceMs=${roundedSilenceMs ?? "null"} db_flipped=${flipped} statusVersion=${version}`
     );
 
     if (!device) return;
@@ -366,20 +445,27 @@ class DevicePresenceService {
         confirmedBy: "presence_hysteresis",
         silenceMs: roundedSilenceMs,
         deviceId: cleanId,
+        statusVersion: version,
       },
     }).catch((err) => console.error(`[PRESENCE] Failed to log device_offline for ${cleanId}:`, err));
 
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
+    const lastSeenStr = record.lastSeenAt ? record.lastSeenAt.toISOString() : now.toISOString();
+
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_OFFLINE",
       deviceId: cleanId,
       timestamp: now.toISOString(),
+      statusVersion: version,
+      lastSeen: lastSeenStr,
     });
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_STATUS",
       deviceId: cleanId,
       online: false,
       doorState: device.doorState,
+      statusVersion: version,
+      lastSeen: lastSeenStr,
     });
 
     deviceNotificationService.scheduleOfflineNotification(device);
@@ -397,6 +483,7 @@ class DevicePresenceService {
     }
     record.publishedOnline = true;
     this.stats.onlinePublished += 1;
+    const version = this.nextStatusVersion(cleanId);
 
     const now = new Date();
     let device: any = deviceDoc ?? null;
@@ -420,7 +507,7 @@ class DevicePresenceService {
     if (mongoose.connection.readyState === 1) {
       await Device.updateOne(
         { deviceId: cleanId },
-        { $set: { online: true, lastConnectedAt: now, lastHeartbeat: now } }
+        { $set: { online: true, lastConnectedAt: now, lastHeartbeat: now, statusVersion: version } }
       ).catch((err) => {
         this.stats.publishFailures += 1;
         console.error(`[PRESENCE] Failed to project online state for ${cleanId}:`, err);
@@ -431,14 +518,18 @@ class DevicePresenceService {
       deviceId: device._id,
       action: "device_online",
       timestamp: now,
-      metadata: { source: origin, deviceId: cleanId, confirmedBy: "presence_hysteresis" },
+      metadata: { source: origin, deviceId: cleanId, confirmedBy: "presence_hysteresis", statusVersion: version },
     }).catch((err) => console.error(`[PRESENCE] Failed to log device_online for ${cleanId}:`, err));
 
     const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
+    const lastSeenStr = record.lastSeenAt ? record.lastSeenAt.toISOString() : now.toISOString();
+
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_ONLINE",
       deviceId: cleanId,
       timestamp: now.toISOString(),
+      statusVersion: version,
+      lastSeen: lastSeenStr,
     });
     wsService.broadcastToDeviceGroup(targets, {
       type: "DEVICE_STATUS",
@@ -446,6 +537,8 @@ class DevicePresenceService {
       doorState: device.doorState,
       doorStatus: device.doorState === "closed" ? "locked" : "unlocked",
       online: true,
+      statusVersion: version,
+      lastSeen: lastSeenStr,
     });
 
     console.log(
@@ -528,6 +621,7 @@ class DevicePresenceService {
           previous: record.state,
           socketOpen: record.socketOpen,
           lastSeenAgeMs: this.ageOf(record),
+          consecutiveOfflineTicks: record.consecutiveOfflineTicks,
         },
         this.timing
       );
@@ -592,6 +686,8 @@ class DevicePresenceService {
       lastSeenAt: doc?.lastHeartbeat ? new Date(doc.lastHeartbeat) : new Date(0),
       confirmTimer: null,
       lastOrigin: null,
+      statusVersion: typeof doc?.statusVersion === "number" ? doc.statusVersion : 1,
+      consecutiveOfflineTicks: 0,
     };
     this.records.set(cleanId, record);
     return record;
