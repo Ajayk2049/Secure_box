@@ -1,9 +1,15 @@
 import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
-import { deviceSocketService } from "./deviceSocket.service.js";
+import { deviceSocketService, getGhostTimeoutMs } from "./deviceSocket.service.js";
 import { deviceNotificationService } from "./deviceNotification.service.js";
-import { config } from "../config.js";
+
+function dbHeartbeatAgeMs(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Date.now() - ms;
+}
 
 /**
  * Background watchdog worker: marks devices offline when no heartbeat or WebSocket frame received.
@@ -15,7 +21,7 @@ export async function checkDeviceWatchdog(): Promise<void> {
     deviceSocketService.sweepConnections();
 
     // 2. Database safety sweep: catches any offline devices not covered by active sockets
-    const ghostCutoffMs = (config.deviceGhostTimeoutSec || 30) * 1000;
+    const ghostCutoffMs = getGhostTimeoutMs();
     const threshold = new Date(Date.now() - ghostCutoffMs);
     const staleDevices = await Device.find({
       online: true,
@@ -28,7 +34,23 @@ export async function checkDeviceWatchdog(): Promise<void> {
 
     for (const dev of staleDevices) {
       // Only protect if connection is genuinely fresh in RAM
-      if (!deviceSocketService.isDeviceConnected(dev.deviceId)) {
+      const protectedBySocket = deviceSocketService.isDeviceConnected(dev.deviceId);
+      if (protectedBySocket) {
+        const snap = deviceSocketService.getConnectionSnapshot(dev.deviceId);
+        console.log(
+          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_protect device=${dev.deviceId} ` +
+            `dbOnline=true dbHeartbeatAgeMs=${dbHeartbeatAgeMs(dev.lastHeartbeat)} cutoffMs=${ghostCutoffMs} ` +
+            `socketTracked=${snap.tracked} socketState=${snap.state} socketAgeMs=${snap.lastActivityAgeMs} ` +
+            `socketFresh=${snap.isFresh} missedPings=${snap.missedPings} decision=KEEP_ONLINE reason=socket_fresh`
+        );
+      } else {
+        const snap = deviceSocketService.getConnectionSnapshot(dev.deviceId);
+        console.log(
+          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_demote device=${dev.deviceId} ` +
+            `dbOnline=true dbHeartbeatAgeMs=${dbHeartbeatAgeMs(dev.lastHeartbeat)} cutoffMs=${ghostCutoffMs} ` +
+            `socketTracked=${snap.tracked} socketState=${snap.state} socketAgeMs=${snap.lastActivityAgeMs} ` +
+            `socketFresh=${snap.isFresh} missedPings=${snap.missedPings} decision=MARK_OFFLINE reason=no_fresh_socket`
+        );
         actuallyStale.push(dev);
       }
     }
@@ -45,6 +67,9 @@ export async function checkDeviceWatchdog(): Promise<void> {
       );
 
       if (freshlyStale) {
+        console.log(
+          `[DEVICE-STATUS-TRACE] at=${new Date().toISOString()} watchdog_applied device=${dev.deviceId} transition=ONLINE_TO_OFFLINE source=watchdog_timeout`
+        );
         await Log.create({
           deviceId: dev._id,
           action: "device_offline",

@@ -212,7 +212,87 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
   });
 }
 
-// 5. Update Device / Box Name
+// 6. Phase 0 diagnostics: explain exactly which inputs produced the online status
+export async function getDeviceStatusDebug(request: FastifyRequest, reply: FastifyReply) {
+  const { id } = request.params as { id: string };
+  const user = request.user as { id: string; role?: string };
+
+  if (!id || !id.trim()) {
+    return reply.status(400).send({ error: "Device id is required" });
+  }
+
+  const target = id.trim();
+  let device: any = null;
+  if (mongoose.Types.ObjectId.isValid(target)) {
+    device = await Device.findById(target).select("-deviceKey -deviceKeyHash").lean();
+  }
+  if (!device) {
+    device = await Device.findOne({ deviceId: target.toUpperCase() })
+      .select("-deviceKey -deviceKeyHash")
+      .lean();
+  }
+
+  if (!device) {
+    return reply.status(404).send({ error: "Device not found" });
+  }
+
+  const isAdmin = user.role === "admin";
+  if (!isAdmin && !isAuthorizedUser(device, user.id)) {
+    return reply.status(403).send({ error: "Not authorized" });
+  }
+
+  // Phase 0: durable churn history. device_online is written on every hardware
+  // (re)connect, so its count is a direct measure of socket churn; offline
+  // entries are split by producer so the cause is attributable.
+  const query = (request.query as { windowHours?: string }) || {};
+  const parsedWindow = parseInt(query.windowHours || "24", 10);
+  const windowHours = Number.isFinite(parsedWindow)
+    ? Math.min(168, Math.max(1, parsedWindow))
+    : 24;
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+
+  const transitionLogs = await Log.find({
+    $or: [{ deviceId: device._id }, { "metadata.deviceId": device.deviceId }],
+    action: { $in: ["device_online", "device_offline"] },
+    timestamp: { $gte: since },
+  })
+    .sort({ timestamp: -1 })
+    .limit(2000)
+    .select("action timestamp metadata.source")
+    .lean();
+
+  const counts = { online: 0, offlineSocket: 0, offlineWatchdog: 0, offlineOther: 0 };
+  for (const entry of transitionLogs as any[]) {
+    if (entry.action === "device_online") {
+      counts.online += 1;
+    } else {
+      const source = entry.metadata?.source;
+      if (source === "esp32_websocket_disconnect") counts.offlineSocket += 1;
+      else if (source === "watchdog_timeout") counts.offlineWatchdog += 1;
+      else counts.offlineOther += 1;
+    }
+  }
+
+  return reply.send({
+    status: deviceStatusService.buildStatusDebug(device),
+    history: {
+      windowHours,
+      since: since.toISOString(),
+      truncated: transitionLogs.length >= 2000,
+      counts,
+      // Hardware reconnects per hour. Baseline this before the fix, then compare.
+      reconnectsPerHour: Number((counts.online / windowHours).toFixed(2)),
+      recentTransitions: (transitionLogs as any[]).slice(0, 15).map((entry) => ({
+        action: entry.action,
+        at: entry.timestamp ? new Date(entry.timestamp).toISOString() : null,
+        source: entry.metadata?.source ?? null,
+      })),
+    },
+    requestedBy: { userId: user.id, role: user.role || "user" },
+  });
+}
+
+// 7. Update Device / Box Name
 export async function updateDeviceName(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
   const user = request.user as { id: string };

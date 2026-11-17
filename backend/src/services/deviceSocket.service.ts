@@ -16,6 +16,58 @@ interface ConnectedDevice {
   missedPings: number;
 }
 
+export type DeviceSocketState = "OPEN" | "CONNECTING" | "CLOSING" | "CLOSED" | "UNKNOWN";
+
+/** How recent RAM activity must be for a socket to count as "genuinely alive". */
+export const SOCKET_FRESHNESS_MS = 15_000;
+
+/** Fallback DB heartbeat window used by resolveDeviceOnline when no live socket exists. */
+export const DB_HEARTBEAT_FALLBACK_MS = 25_000;
+
+/** Total silence after which a tracked socket is considered a ghost and terminated. */
+export function getGhostTimeoutMs(): number {
+  return (config.deviceGhostTimeoutSec || 30) * 1000;
+}
+
+/**
+ * Phase 0 diagnostics: raw in-memory view of a hardware socket.
+ * Read-only; used by the status-debug endpoint and watchdog tracing.
+ */
+export interface DeviceSocketSnapshot {
+  tracked: boolean;
+  state: DeviceSocketState;
+  connectedAt: string | null;
+  connectedForMs: number | null;
+  lastActivityAt: string | null;
+  lastActivityAgeMs: number | null;
+  missedPings: number | null;
+  isFresh: boolean;
+  freshnessWindowMs: number;
+  ghostTimeoutMs: number;
+}
+
+function socketStateName(readyState: number): DeviceSocketState {
+  switch (readyState) {
+    case WebSocket.OPEN:
+      return "OPEN";
+    case WebSocket.CONNECTING:
+      return "CONNECTING";
+    case WebSocket.CLOSING:
+      return "CLOSING";
+    case WebSocket.CLOSED:
+      return "CLOSED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function ageMsOf(date: Date | string | null | undefined, nowMs: number): number | null {
+  if (!date) return null;
+  const ms = new Date(date).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return nowMs - ms;
+}
+
 class DeviceSocketService {
   private devices: Map<string, ConnectedDevice> = new Map();
 
@@ -76,13 +128,17 @@ class DeviceSocketService {
 
     // Close any previous stale connection for this device
     const existing = this.devices.get(cleanId);
-    if (existing && existing.ws !== ws && existing.ws.readyState === WebSocket.OPEN) {
+    const replacedLiveSocket = Boolean(
+      existing && existing.ws !== ws && existing.ws.readyState === WebSocket.OPEN
+    );
+    if (replacedLiveSocket && existing) {
       try {
         existing.ws.close(4001, "New connection established for device");
       } catch { }
     }
 
     const now = new Date();
+    const nowMs = now.getTime();
     this.devices.set(cleanId, {
       ws,
       deviceId: cleanId,
@@ -94,10 +150,20 @@ class DeviceSocketService {
     console.log(`[DEVICE-WS] Hardware connected: ${cleanId}`);
 
     // Update MongoDB status to online with connection timestamp
+    const onlineBefore = deviceDoc.online === true;
+    const heartbeatBeforeAgeMs = ageMsOf(deviceDoc.lastHeartbeat, nowMs);
     deviceDoc.online = true;
     deviceDoc.lastHeartbeat = now;
     deviceDoc.lastConnectedAt = now;
     await deviceDoc.save().catch(() => { });
+
+    console.log(
+      `[DEVICE-STATUS-TRACE] at=${now.toISOString()} register_device device=${cleanId} ` +
+        `prevTracked=${Boolean(existing)} prevSocketAgeMs=${ageMsOf(existing?.lastHeartbeat, nowMs)} ` +
+        `prevMissedPings=${existing?.missedPings ?? "null"} replacedLiveSocket=${replacedLiveSocket} ` +
+        `dbOnlineBefore=${onlineBefore} dbHeartbeatAgeBeforeMs=${heartbeatBeforeAgeMs} ` +
+        `transition=${onlineBefore ? "ONLINE_STAYED_ONLINE" : "OFFLINE_TO_ONLINE"} source=esp32_websocket`
+    );
 
     // Create persistent activity log record
     await Log.create({
@@ -148,6 +214,14 @@ class DeviceSocketService {
         { deviceId: cleanId, online: true },
         { $set: { online: false, lastDisconnectedAt: disconnectTime } },
         { new: false }
+      );
+
+      console.log(
+        `[DEVICE-STATUS-TRACE] at=${disconnectTime.toISOString()} handle_disconnect device=${cleanId} ` +
+          `socketAgeMs=${ageMsOf(current.lastHeartbeat, disconnectTime.getTime())} ` +
+          `missedPings=${current.missedPings} socketState=${socketStateName(current.ws.readyState)} ` +
+          `dbOnlineBefore=${Boolean(device)} dbHeartbeatAgeMs=${ageMsOf(device?.lastHeartbeat, disconnectTime.getTime())} ` +
+          `transition=${device ? "ONLINE_TO_OFFLINE" : "ALREADY_OFFLINE_NOOP"} source=esp32_websocket_disconnect`
       );
 
       // If device was already offline, avoid duplicate audit log and broadcast!
@@ -225,7 +299,7 @@ class DeviceSocketService {
    */
   sweepConnections(): void {
     const now = Date.now();
-    const ghostCutoffMs = (config.deviceGhostTimeoutSec || 30) * 1000;
+    const ghostCutoffMs = getGhostTimeoutMs();
 
     for (const [cleanId, conn] of this.devices.entries()) {
       const timeSinceHeartbeat = now - conn.lastHeartbeat.getTime();
@@ -326,8 +400,59 @@ class DeviceSocketService {
     if (!conn || conn.ws.readyState !== WebSocket.OPEN) {
       return false;
     }
-    // Verified alive in memory within the last 15 seconds
-    return Date.now() - conn.lastHeartbeat.getTime() < 15000;
+    // Verified alive in memory within the freshness window
+    return Date.now() - conn.lastHeartbeat.getTime() < SOCKET_FRESHNESS_MS;
+  }
+
+  /**
+   * Phase 0 diagnostics: read-only snapshot of the in-memory socket state.
+   * Never mutates the registry; safe to call from request handlers.
+   */
+  getConnectionSnapshot(deviceId: string, nowMs: number = Date.now()): DeviceSocketSnapshot {
+    const cleanId = (deviceId || "").trim().toUpperCase();
+    const conn = this.devices.get(cleanId);
+
+    if (!conn) {
+      return {
+        tracked: false,
+        state: "CLOSED",
+        connectedAt: null,
+        connectedForMs: null,
+        lastActivityAt: null,
+        lastActivityAgeMs: null,
+        missedPings: null,
+        isFresh: false,
+        freshnessWindowMs: SOCKET_FRESHNESS_MS,
+        ghostTimeoutMs: getGhostTimeoutMs(),
+      };
+    }
+
+    const lastActivityAgeMs = ageMsOf(conn.lastHeartbeat, nowMs);
+
+    return {
+      tracked: true,
+      state: socketStateName(conn.ws.readyState),
+      connectedAt: conn.connectedAt.toISOString(),
+      connectedForMs: nowMs - conn.connectedAt.getTime(),
+      lastActivityAt: conn.lastHeartbeat.toISOString(),
+      lastActivityAgeMs,
+      missedPings: conn.missedPings,
+      isFresh:
+        conn.ws.readyState === WebSocket.OPEN &&
+        lastActivityAgeMs !== null &&
+        lastActivityAgeMs < SOCKET_FRESHNESS_MS,
+      freshnessWindowMs: SOCKET_FRESHNESS_MS,
+      ghostTimeoutMs: getGhostTimeoutMs(),
+    };
+  }
+
+  /** Device IDs currently tracked in RAM (OPEN sockets only). */
+  getTrackedDeviceIds(): string[] {
+    const ids: string[] = [];
+    for (const [cleanId, conn] of this.devices.entries()) {
+      if (conn.ws.readyState === WebSocket.OPEN) ids.push(cleanId);
+    }
+    return ids;
   }
 
   getConnectedCount(): number {

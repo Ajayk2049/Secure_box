@@ -2,14 +2,62 @@ import mongoose from "mongoose";
 import { Device, IDevice } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { User } from "../models/User.model.js";
-import { deviceSocketService } from "./deviceSocket.service.js";
+import {
+  deviceSocketService,
+  DB_HEARTBEAT_FALLBACK_MS,
+  SOCKET_FRESHNESS_MS,
+  getGhostTimeoutMs,
+  type DeviceSocketSnapshot,
+} from "./deviceSocket.service.js";
 import { commandQueueService } from "./commandQueue.service.js";
 import { wsService } from "./websocket.service.js";
 
+export type StatusDecisionPath = "socket_fresh" | "db_heartbeat_fallback" | "offline";
+
+export interface DeviceStatusDebug {
+  deviceId: string;
+  name: string | null;
+  sampledAt: string;
+  effectiveOnline: boolean;
+  decisionPath: StatusDecisionPath;
+  db: {
+    online: boolean;
+    lastHeartbeat: string | null;
+    lastHeartbeatAgeMs: number | null;
+    lastConnectedAt: string | null;
+    lastDisconnectedAt: string | null;
+  };
+  socket: DeviceSocketSnapshot;
+  thresholds: {
+    socketFreshnessMs: number;
+    dbHeartbeatFallbackMs: number;
+    ghostTimeoutMs: number;
+  };
+  inconsistencies: string[];
+}
+
 export class DeviceStatusService {
   /**
+   * Phase 0: single place that explains WHY a device is online or offline,
+   * including every input the decision consumed.
+   */
+  private evaluate(deviceId: string, dbOnline: boolean | undefined, lastHeartbeat: Date | string | null | undefined, nowMs: number) {
+    const socket = deviceSocketService.getConnectionSnapshot(deviceId, nowMs);
+    if (socket.isFresh) {
+      return { socket, path: "socket_fresh" as StatusDecisionPath, online: true };
+    }
+    if (dbOnline && lastHeartbeat) {
+      const hbTime = new Date(lastHeartbeat).getTime();
+      if (Number.isFinite(hbTime) && nowMs - hbTime < DB_HEARTBEAT_FALLBACK_MS) {
+        return { socket, path: "db_heartbeat_fallback" as StatusDecisionPath, online: true };
+      }
+    }
+    return { socket, path: "offline" as StatusDecisionPath, online: false };
+  }
+
+  /**
    * Evaluates live online status: checks active hardware WebSocket first,
-   * falling back to 45s heartbeat window.
+   * falling back to the DB heartbeat window.
    */
   resolveDeviceOnline(
     deviceId: string,
@@ -18,19 +66,63 @@ export class DeviceStatusService {
   ): boolean {
     if (!deviceId) return false;
     const cleanId = deviceId.trim().toUpperCase();
+    return this.evaluate(cleanId, dbOnline, lastHeartbeat, Date.now()).online;
+  }
 
-    // 1. Direct hardware WebSocket check (Primary Source of Truth)
-    if (deviceSocketService.isDeviceConnected(cleanId)) {
-      return true;
+  /**
+   * Phase 0: read-only diagnostic snapshot used by GET /devices/:id/status-debug.
+   * Reports each producer's value plus the inconsistencies between them.
+   */
+  buildStatusDebug(device: any, nowMs = Date.now()): DeviceStatusDebug {
+    const cleanId = String(device.deviceId || "").trim().toUpperCase();
+    const dbOnline = device.online === true;
+    const evaluated = this.evaluate(cleanId, dbOnline, device.lastHeartbeat, nowMs);
+    const socket = evaluated.socket;
+    const heartbeatAgeMs = device.lastHeartbeat
+      ? nowMs - new Date(device.lastHeartbeat).getTime()
+      : null;
+    const ghostTimeoutMs = getGhostTimeoutMs();
+
+    const inconsistencies: string[] = [];
+    if (!dbOnline && socket.isFresh) {
+      inconsistencies.push("db_offline_but_socket_fresh");
+    }
+    if (dbOnline && socket.isFresh && (heartbeatAgeMs === null || heartbeatAgeMs >= DB_HEARTBEAT_FALLBACK_MS)) {
+      inconsistencies.push("db_heartbeat_stale_while_socket_active");
+    }
+    if (dbOnline && !socket.isFresh && (heartbeatAgeMs === null || heartbeatAgeMs >= ghostTimeoutMs)) {
+      inconsistencies.push("db_online_but_no_evidence");
+    }
+    if (socket.tracked && socket.state !== "OPEN") {
+      inconsistencies.push("socket_tracked_but_not_open");
+    }
+    if (evaluated.online !== dbOnline) {
+      inconsistencies.push(
+        evaluated.online ? "effective_online_but_db_offline" : "effective_offline_but_db_online"
+      );
     }
 
-    // 2. Fallback to fresh heartbeat threshold (45 seconds)
-    if (dbOnline && lastHeartbeat) {
-      const hbTime = new Date(lastHeartbeat).getTime();
-      return Date.now() - hbTime < 25000;
-    }
-
-    return false;
+    return {
+      deviceId: cleanId,
+      name: device.name ?? null,
+      sampledAt: new Date(nowMs).toISOString(),
+      effectiveOnline: evaluated.online,
+      decisionPath: evaluated.path,
+      db: {
+        online: dbOnline,
+        lastHeartbeat: device.lastHeartbeat ? new Date(device.lastHeartbeat).toISOString() : null,
+        lastHeartbeatAgeMs: heartbeatAgeMs,
+        lastConnectedAt: device.lastConnectedAt ? new Date(device.lastConnectedAt).toISOString() : null,
+        lastDisconnectedAt: device.lastDisconnectedAt ? new Date(device.lastDisconnectedAt).toISOString() : null,
+      },
+      socket,
+      thresholds: {
+        socketFreshnessMs: SOCKET_FRESHNESS_MS,
+        dbHeartbeatFallbackMs: DB_HEARTBEAT_FALLBACK_MS,
+        ghostTimeoutMs,
+      },
+      inconsistencies,
+    };
   }
 
   /**

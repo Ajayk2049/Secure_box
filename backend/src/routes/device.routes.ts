@@ -17,6 +17,7 @@ import {
   unlockDevice,
   getDeviceLogs,
   updateDeviceName,
+  getDeviceStatusDebug,
 } from "../controllers/device.controller.js";
 
 import { testUnlockDevice } from "../controllers/testDiagnostics.controller.js";
@@ -102,6 +103,11 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
 
     authScope.get("/devices/:id/logs", {
       handler: getDeviceLogs,
+    });
+
+    // Phase 0 diagnostics: read-only online-status explanation (owner/co-owner/admin)
+    authScope.get("/devices/:id/status-debug", {
+      handler: getDeviceStatusDebug,
     });
 
     authScope.patch("/devices/:id/name", {
