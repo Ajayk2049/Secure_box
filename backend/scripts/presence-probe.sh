@@ -65,7 +65,7 @@ JS
 
 login() {
   local resp body
-  resp="$(curl -s -c "$JAR" -X POST "$API/login" \
+  resp="$(curl -s -c "$JAR" -X POST "$API/api/auth/login" \
     -H 'Content-Type: application/json' \
     -d "$(node -e 'console.log(JSON.stringify({identifier:process.argv[1],password:process.argv[2]}))' "$IDENTIFIER" "$PASSWORD")")"
   # Non-admin login returns the JWT in the body; admin login only sets a cookie.
@@ -83,9 +83,9 @@ login() {
 
 fetch() {
   if [ -n "$TOKEN" ]; then
-    curl -s -H "Authorization: Bearer $TOKEN" "$API/devices/$DEVICE/status-debug?windowHours=${1:-1}"
+    curl -s -H "Authorization: Bearer $TOKEN" "$API/api/devices/$DEVICE/status-debug?windowHours=${1:-1}"
   else
-    curl -s -b "$JAR" "$API/devices/$DEVICE/status-debug?windowHours=${1:-1}"
+    curl -s -b "$JAR" "$API/api/devices/$DEVICE/status-debug?windowHours=${1:-1}"
   fi
 }
 
