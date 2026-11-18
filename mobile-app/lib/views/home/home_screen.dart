@@ -14,6 +14,7 @@ import '../widgets/order_locker_modal.dart';
 import '../widgets/pin_screen.dart';
 import 'widgets/co_owner_invite_sheet.dart';
 import 'widgets/home_bottom_nav.dart';
+import 'widgets/home_connecting_card.dart';
 import 'widgets/home_empty_state.dart';
 import 'widgets/home_history_tab.dart';
 import 'widgets/home_user_greeting.dart';
@@ -26,12 +27,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _currentTab = 0; // 0: Home, 1: History, 2: Settings
   String? _unlockingDeviceId;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().init();
     });
@@ -39,7 +41,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<HomeViewModel>().handleAppResumed();
+    }
   }
 
   void _showAddLocker(BuildContext context) {
@@ -270,6 +280,33 @@ class _HomeScreenState extends State<HomeScreen> {
     final devices = homeVM.devices;
 
     if (devices.isEmpty) {
+      if (homeVM.isCheckingReachability || homeVM.loading) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: const EdgeInsets.only(left: 18, right: 18, top: 12, bottom: 95),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  HomeUserGreeting(
+                    userName: userName,
+                    avatarEmoji: authVM.avatarEmoji,
+                    showAddButton: false,
+                    isOffline: false,
+                    onAddLocker: () => _showAddLocker(context),
+                    onProfileTap: () => EditProfileModal.show(context),
+                  ),
+                  const SizedBox(height: 16),
+                  const HomeConnectingCard(),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
       return RefreshIndicator(
         color: ParcelGlassColors.accentBlue,
         onRefresh: () => homeVM.fetchDevices(),
@@ -295,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onAddLocker: () => _showAddLocker(context),
                           onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                         ),
-                        if (homeVM.isOffline) ...[
+                        if (homeVM.isOffline && !homeVM.isCheckingReachability) ...[
                           const SizedBox(height: 16),
                           ConnectionWarningCard(issue: homeVM.connectionIssue),
                         ],
@@ -338,7 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onProfileTap: homeVM.isOffline ? () => _showOfflineWarning(context) : () => EditProfileModal.show(context),
                 ),
                 const SizedBox(height: 16),
-                if (homeVM.isOffline) ...[
+                if (homeVM.isOffline && !homeVM.isCheckingReachability) ...[
                   ConnectionWarningCard(issue: homeVM.connectionIssue),
                 ],
                 for (final device in devices) ...[

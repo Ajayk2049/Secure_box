@@ -80,6 +80,7 @@ class HomeViewModel extends ChangeNotifier {
 
     // 1. FAST PATH: Load cached devices immediately so locker card appears on Frame 0 (<5ms)
     await _loadCachedDevices();
+    _loading = _devices.isEmpty;
     notifyListeners();
 
     // 2. BACKGROUND PATH: Sync live devices & connect WebSocket without blocking UI launch
@@ -122,6 +123,72 @@ class HomeViewModel extends ChangeNotifier {
       _diagnoseConnectivity();
     } finally {
       _isCheckingReachability = false;
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Called when the app resumes from background (minimized -> reopened).
+  /// Enters safe connecting state immediately without showing intrusive error toasts.
+  Future<void> handleAppResumed() async {
+    final hasToken = await _storage.hasToken();
+    if (!hasToken) return;
+
+    // 1. Immediately enter safe connecting state and suppress any error banner
+    _isCheckingReachability = true;
+    _connectionIssue = ConnectionIssue.none;
+    _failedPollAttempts = 0;
+    notifyListeners();
+
+    // 2. Immediately reconnect WebSocket
+    _ws.connect();
+
+    // 3. Background device sync with gentle retry if mobile network is waking up
+    try {
+      final devicesData = await _api.getDevices();
+      _failedPollAttempts = 0;
+      _connectionIssue = ConnectionIssue.none;
+      final newDevices = devicesData
+          .map((json) => DeviceModel.fromJson(json))
+          .toList();
+
+      _cacheManager.saveCachedDevices(devicesData);
+      final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+      _devices = _reconcileWithCurrentState(updatedDevices);
+      if (_devices.isNotEmpty && _selectedDeviceId == null) {
+        _selectedDeviceId = _devices.first.deviceId;
+      }
+
+      for (final d in _devices) {
+        _ws.joinRoom(d.id);
+        _ws.joinRoom(d.deviceId);
+      }
+    } catch (_) {
+      // Gentle retry after 1.5s in case OS radio was asleep
+      await Future.delayed(const Duration(milliseconds: 1500));
+      try {
+        final devicesData = await _api.getDevices();
+        _failedPollAttempts = 0;
+        _connectionIssue = ConnectionIssue.none;
+        final newDevices = devicesData
+            .map((json) => DeviceModel.fromJson(json))
+            .toList();
+
+        _cacheManager.saveCachedDevices(devicesData);
+        final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
+        _devices = _reconcileWithCurrentState(updatedDevices);
+        for (final d in _devices) {
+          _ws.joinRoom(d.id);
+          _ws.joinRoom(d.deviceId);
+        }
+      } catch (e) {
+        _failedPollAttempts++;
+        if (_failedPollAttempts >= maxFailedAttempts) {
+          _diagnoseConnectivity();
+        }
+      }
+    } finally {
+      _isCheckingReachability = false;
       notifyListeners();
     }
   }
@@ -157,7 +224,10 @@ class HomeViewModel extends ChangeNotifier {
   void _handleWebSocketMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString();
     final targetDeviceId = message['deviceId']?.toString();
-    if ((type == 'EMERGENCY_UNLOCK' || type == 'DELIVERY_SUCCESS') && targetDeviceId != null) {
+    final isClosedEvent = type == 'DELIVERY_SUCCESS' ||
+        (type == 'DEVICE_STATUS' &&
+            (message['doorState'] == 'closed' || message['doorStatus'] == 'locked'));
+    if ((type == 'EMERGENCY_UNLOCK' || isClosedEvent) && targetDeviceId != null) {
       fetchDeviceLogs(targetDeviceId);
     }
 
@@ -366,7 +436,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _diagnoseConnectivity() async {
-    if (_isDiagnosing || _connectionIssue == ConnectionIssue.sessionExpired) return;
+    if (_isDiagnosing || _isCheckingReachability || _connectionIssue == ConnectionIssue.sessionExpired) return;
     _isDiagnosing = true;
     try {
       final issue = await _connectivity.checkConnectivity();
@@ -614,6 +684,8 @@ class HomeViewModel extends ChangeNotifier {
     }
     _tentativeOfflineTimers.clear();
     _isInitialized = false;
+    _loading = true;
+    _isCheckingReachability = true;
     _devices = [];
     _logs = [];
     _selectedDeviceId = null;

@@ -97,6 +97,15 @@ check(
 );
 
 check(
+  "device already offline stays offline when silence exceeds offlineMs",
+  nextPresenceState(
+    { previous: "offline", socketOpen: false, lastSeenAgeMs: 105_000, consecutiveOfflineTicks: 1 },
+    HYSTERESIS_TIMING
+  ),
+  "offline"
+);
+
+check(
   "recovery at tick 1 returns immediately to online upon frame",
   nextPresenceState(
     { previous: "suspect", socketOpen: true, lastSeenAgeMs: 100, consecutiveOfflineTicks: 0 },

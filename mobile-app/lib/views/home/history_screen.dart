@@ -29,6 +29,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  bool _isDoorLock(String action) {
+    final clean = action.toLowerCase().replaceAll(' ', '_');
+    if (clean.contains('unlock')) return false;
+    return clean.contains('door_closed') || clean.contains('closed') || clean.contains('lock');
+  }
+
+  bool _isDoorUnlock(String action) {
+    final clean = action.toLowerCase().replaceAll(' ', '_');
+    return clean.contains('unlock') || clean.contains('door_open') || clean.contains('opened');
+  }
+
   @override
   Widget build(BuildContext context) {
     final home = context.watch<HomeViewModel>();
@@ -62,26 +73,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
 
       // Deduplicate consecutive lock events: a locker cannot be locked twice without an unlock
-      final isCurrentLock = (a == 'door_closed' || a == 'lock' || a == 'closed');
+      final isCurrentLock = _isDoorLock(a);
       if (isCurrentLock) {
         final lastDoorEvent = filteredLogs.cast<LogModel?>().lastWhere(
           (item) {
             if (item == null) return false;
             final itemAction = item.action.toLowerCase().replaceAll(' ', '_');
-            return itemAction.contains('unlock') ||
-                itemAction.contains('door_open') ||
-                itemAction.contains('lock') ||
-                itemAction.contains('door_closed') ||
-                itemAction == 'closed';
+            return _isDoorUnlock(itemAction) || _isDoorLock(itemAction);
           },
           orElse: () => null,
         );
 
         if (lastDoorEvent != null) {
-          final lastAction = lastDoorEvent.action.toLowerCase().replaceAll(' ', '_');
-          final isLastDoorLock = lastAction.contains('lock') ||
-              lastAction.contains('door_closed') ||
-              lastAction == 'closed';
+          final isLastDoorLock = _isDoorLock(lastDoorEvent.action);
           if (isLastDoorLock) {
             // Already locked; consecutive lock without an intervening unlock is redundant
             continue;

@@ -139,16 +139,6 @@ class _PinScreenState extends State<PinScreen> {
     }
   }
 
-  void _switchToDirectReset() {
-    setState(() {
-      _activeMode = PinScreenMode.reset;
-      _step = 0;
-      _firstPin = null;
-      _currentInput = '';
-      _errorMessage = null;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return ParcelGlassScaffold(
@@ -278,24 +268,8 @@ class _PinScreenState extends State<PinScreen> {
 
                         const SizedBox(height: 20),
 
-                        // Bottom Actions: Direct Reset PIN (when in unlock mode)
-                        if (_activeMode == PinScreenMode.unlock) ...[
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              foregroundColor: ParcelGlassColors.accentBlue,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            ),
-                            icon: const Icon(Icons.refresh_rounded, size: 16),
-                            label: const Text(
-                              'Forgot PIN / Reset PIN',
-                              style: TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            onPressed: _switchToDirectReset,
-                          ),
-                        ] else if ((_activeMode == PinScreenMode.setup || _activeMode == PinScreenMode.reset) && _step == 1) ...[
+                        // Bottom Actions: Back to first step during Setup or Reset
+                        if ((_activeMode == PinScreenMode.setup || _activeMode == PinScreenMode.reset) && _step == 1) ...[
                           TextButton(
                             onPressed: () {
                               setState(() {

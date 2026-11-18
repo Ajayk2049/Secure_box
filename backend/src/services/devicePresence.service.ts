@@ -326,7 +326,10 @@ class DevicePresenceService {
         await this.publishOffline(cleanId, origin, ageMs, deviceDoc);
       }
     } else if (!record.publishedOnline) {
-      await this.publishOnline(cleanId, origin, deviceDoc);
+      // Guard: Never resurrect an offline device into online unless fresh frames were actually received
+      if (nextState === "online" && ageMs < this.timing.offlineMs) {
+        await this.publishOnline(cleanId, origin, deviceDoc);
+      }
     } else if (previousState === "suspect" && nextState === "online") {
       // Silent recovery: frames resumed before anyone was told it was offline.
       this.stats.silentRecoveries += 1;

@@ -45,10 +45,14 @@ export function nextPresenceState(input: PresenceInput, timing: PresenceTiming):
     return socketOpen ? "suspect" : "offline";
   }
 
-  const requiredTicks = timing.requiredOfflineTicks ?? 1;
-  const ticks = consecutiveOfflineTicks ?? requiredTicks;
-
+  // Silence threshold exceeded:
   if (lastSeenAgeMs >= timing.offlineMs) {
+    // An already-offline device stays offline; hysteresis only applies to online -> offline transitions
+    if (previous === "offline") {
+      return "offline";
+    }
+    const requiredTicks = timing.requiredOfflineTicks ?? 1;
+    const ticks = consecutiveOfflineTicks ?? requiredTicks;
     if (ticks >= requiredTicks) {
       return "offline";
     }
