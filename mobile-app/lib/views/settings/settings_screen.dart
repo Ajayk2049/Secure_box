@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
+import '../../view_models/security_view_model.dart';
 import '../widgets/glass_theme.dart';
-import '../widgets/network_host_dialog.dart';
 import 'widgets/edit_profile_modal.dart';
 import 'widgets/manage_users_dialog.dart';
 import 'widgets/rename_device_modal.dart';
 import 'widgets/notification_preferences_modal.dart';
-import 'widgets/biometric_security_tile.dart';
+import 'widgets/security_settings_modal.dart';
 import 'widgets/setting_capsule_tile.dart';
 import '../widgets/order_locker_modal.dart';
 import 'widgets/settings_modals.dart';
@@ -24,6 +24,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthViewModel>();
     final home = context.watch<HomeViewModel>();
+    final security = context.watch<SecurityViewModel>();
 
     final user = auth.user;
     final userName = user?.name ?? user?.phone ?? 'Member';
@@ -143,25 +144,21 @@ class SettingsScreen extends StatelessWidget {
                     : () => OrderLockerModal.show(context),
               ),
 
-              // 4. Device & Network
+              // 4. Security & Authentication (Biometric & 4-Digit PIN)
               SettingCapsuleTile(
-                icon: Icons.wifi,
-                title: 'Device & Network',
-                subtitle: 'Wi-Fi, Bluetooth, Host IP Server',
-                onTap: () => NetworkHostDialog.show(context),
+                icon: Icons.shield_outlined,
+                title: 'Security & Unlock',
+                subtitle: security.securitySummaryText,
+                onTap: () => SecuritySettingsModal.show(context),
               ),
 
-
-              // 4. Notification Preferences
+              // 5. Notification Preferences
               SettingCapsuleTile(
                 icon: Icons.notifications_none_outlined,
                 title: 'Notification Preferences',
                 subtitle: 'Door Status, Locker Connectivity',
                 onTap: () => NotificationPreferencesModal.show(context),
               ),
-
-              // 5. Biometric Unlock Security (Per-User / Per-Phone)
-              const BiometricSecurityTile(),
 
               // 6. About
               SettingCapsuleTile(

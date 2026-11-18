@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../view_models/auth_view_model.dart';
 import '../../widgets/glass_theme.dart';
 import 'avatar_emoji_picker.dart';
+import 'change_password_dialog.dart';
 
 class EditProfileModal extends StatefulWidget {
   const EditProfileModal({super.key});
@@ -272,7 +273,34 @@ class _EditProfileModalState extends State<EditProfileModal> {
             ),
           ],
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
+
+          // Change Login Password Action Button
+          OutlinedButton.icon(
+            onPressed: _isLoading ? null : () => ChangePasswordDialog.show(context),
+            icon: const Icon(Icons.lock_reset_rounded, size: 17, color: ParcelGlassColors.navyTitle),
+            label: const Text(
+              'CHANGE LOGIN PASSWORD',
+              style: TextStyle(
+                color: ParcelGlassColors.navyTitle,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              side: BorderSide(
+                color: ParcelGlassColors.navyTitle.withValues(alpha: 0.35),
+                width: 1.2,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
 
           // Save Action Button
           SizedBox(

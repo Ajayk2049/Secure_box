@@ -133,6 +133,7 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
   devicePresenceService.noteFrame(targetId, "iot_telemetry");
   const version = devicePresenceService.nextStatusVersion(targetId);
   const nowIso = new Date().toISOString();
+  const previousState = device.doorState;
   device.doorState = normalizedDoorState;
   device.online = true;
   device.lastHeartbeat = new Date();
@@ -152,63 +153,65 @@ export async function receiveTelemetry(request: FastifyRequest, reply: FastifyRe
   const targets = [targetId, device._id, device.ownerId, ...(device.coOwners || [])];
   wsService.broadcastToDeviceGroup(targets, statusMsg);
 
-  if (normalizedDoorState === "closed") {
-    await Log.create({
-      deviceId: device._id,
-      action: "lock",
-      metadata: { event: "door_locked", source: "physical_sensor", userName: "Mechanical Latch", userRole: "Auto / Sensor", deviceId: device.deviceId },
-    });
-
-    const deliveryMsg = {
-      type: "DELIVERY_SUCCESS",
-      deviceId: targetId,
-      doorState: "closed",
-      doorStatus: "locked",
-      online: true,
-      statusVersion: version,
-      lastSeen: nowIso,
-    };
-    wsService.broadcastToDeviceGroup(targets, deliveryMsg);
-  } else {
-    // Hardware door opened: check if this was triggered by an authorized app command
-    const hasAuthorizedAppUnlock = commandQueueService.hasRecentUnlock(targetId);
-
-    if (hasAuthorizedAppUnlock) {
-      // Authorized app unlock already logged with user attribution; consume window
-      commandQueueService.consumeRecentUnlock(targetId);
-    } else {
-      // Manual / Emergency unlock detected (key, lever, or state change during power restore)
+  if (previousState !== normalizedDoorState) {
+    if (normalizedDoorState === "closed") {
       await Log.create({
         deviceId: device._id,
-        action: "emergency_unlock",
-        metadata: {
-          event: "emergency_manual_unlock",
-          source: "physical_sensor",
-          userName: "Emergency Key / Lever",
-          userRole: "Physical Access",
-          deviceId: device.deviceId,
-          detection: "hardware_feedback_trip",
-        },
+        action: "lock",
+        metadata: { event: "door_locked", source: "physical_sensor", userName: "Mechanical Latch", userRole: "Auto / Sensor", deviceId: device.deviceId },
       });
 
-      const emergencyMsg = {
-        type: "EMERGENCY_UNLOCK",
+      const deliveryMsg = {
+        type: "DELIVERY_SUCCESS",
+        deviceId: targetId,
+        doorState: "closed",
+        doorStatus: "locked",
+        online: true,
+        statusVersion: version,
+        lastSeen: nowIso,
+      };
+      wsService.broadcastToDeviceGroup(targets, deliveryMsg);
+    } else {
+      // Hardware door opened: check if this was triggered by an authorized app command
+      const hasAuthorizedAppUnlock = commandQueueService.hasRecentUnlock(targetId);
+
+      if (hasAuthorizedAppUnlock) {
+        // Authorized app unlock already logged with user attribution; consume window
+        commandQueueService.consumeRecentUnlock(targetId);
+      } else {
+        // Manual / Emergency unlock detected (key, lever, or state change during power restore)
+        await Log.create({
+          deviceId: device._id,
+          action: "emergency_unlock",
+          metadata: {
+            event: "emergency_manual_unlock",
+            source: "physical_sensor",
+            userName: "Emergency Key / Lever",
+            userRole: "Physical Access",
+            deviceId: device.deviceId,
+            detection: "hardware_feedback_trip",
+          },
+        });
+
+        const emergencyMsg = {
+          type: "EMERGENCY_UNLOCK",
+          deviceId: targetId,
+          doorState: "open",
+          doorStatus: "unlocked",
+          online: true,
+        };
+        wsService.broadcastToDeviceGroup(targets, emergencyMsg);
+      }
+
+      const openMsg = {
+        type: "DOOR_OPEN",
         deviceId: targetId,
         doorState: "open",
         doorStatus: "unlocked",
         online: true,
       };
-      wsService.broadcastToDeviceGroup(targets, emergencyMsg);
+      wsService.broadcastToDeviceGroup(targets, openMsg);
     }
-
-    const openMsg = {
-      type: "DOOR_OPEN",
-      deviceId: targetId,
-      doorState: "open",
-      doorStatus: "unlocked",
-      online: true,
-    };
-    wsService.broadcastToDeviceGroup(targets, openMsg);
   }
 
   return reply.send({

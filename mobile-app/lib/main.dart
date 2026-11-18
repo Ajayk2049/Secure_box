@@ -7,8 +7,10 @@ import 'config.dart';
 import 'view_models/auth_view_model.dart';
 import 'view_models/home_view_model.dart';
 import 'view_models/websocket_view_model.dart';
+import 'view_models/security_view_model.dart';
 import 'views/auth/login_screen.dart';
 import 'views/auth/register_screen.dart';
+import 'views/auth/reset_password_screen.dart';
 import 'views/home/home_screen.dart';
 import 'views/home/history_screen.dart';
 import 'views/widgets/glass_theme.dart';
@@ -46,6 +48,7 @@ class SecureBoxApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthViewModel()..init()),
         ChangeNotifierProvider(create: (_) => HomeViewModel()),
         ChangeNotifierProvider(create: (_) => WebSocketViewModel()),
+        ChangeNotifierProvider(create: (_) => SecurityViewModel()..init()),
       ],
       child: MaterialApp(
         navigatorKey: appNavigatorKey,
@@ -70,6 +73,7 @@ class SecureBoxApp extends StatelessWidget {
         routes: {
           '/login': (context) => const LoginScreen(),
           '/register': (context) => const RegisterScreen(),
+          '/reset-password': (context) => const ResetPasswordScreen(),
           '/home': (context) => const HomeScreen(),
           '/history': (context) => const HistoryScreen(),
         },

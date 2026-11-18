@@ -53,11 +53,40 @@ class _HistoryScreenState extends State<HistoryScreen> {
         continue;
       }
 
+      // Deduplicate rapid consecutive duplicate offline or online events within 30s
       if (filteredLogs.isNotEmpty &&
           filteredLogs.last.action.toLowerCase() == l.action.toLowerCase() &&
-          (a == 'device_offline' || a == 'device_online' || a == 'door_closed' || a == 'lock') &&
-          filteredLogs.last.timestamp.difference(l.timestamp).abs().inSeconds <= 10) {
+          (a == 'device_offline' || a == 'device_online') &&
+          filteredLogs.last.timestamp.difference(l.timestamp).abs().inSeconds <= 30) {
         continue;
+      }
+
+      // Deduplicate consecutive lock events: a locker cannot be locked twice without an unlock
+      final isCurrentLock = (a == 'door_closed' || a == 'lock' || a == 'closed');
+      if (isCurrentLock) {
+        final lastDoorEvent = filteredLogs.cast<LogModel?>().lastWhere(
+          (item) {
+            if (item == null) return false;
+            final itemAction = item.action.toLowerCase().replaceAll(' ', '_');
+            return itemAction.contains('unlock') ||
+                itemAction.contains('door_open') ||
+                itemAction.contains('lock') ||
+                itemAction.contains('door_closed') ||
+                itemAction == 'closed';
+          },
+          orElse: () => null,
+        );
+
+        if (lastDoorEvent != null) {
+          final lastAction = lastDoorEvent.action.toLowerCase().replaceAll(' ', '_');
+          final isLastDoorLock = lastAction.contains('lock') ||
+              lastAction.contains('door_closed') ||
+              lastAction == 'closed';
+          if (isLastDoorLock) {
+            // Already locked; consecutive lock without an intervening unlock is redundant
+            continue;
+          }
+        }
       }
       filteredLogs.add(l);
     }

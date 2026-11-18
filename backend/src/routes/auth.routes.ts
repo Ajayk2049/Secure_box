@@ -11,6 +11,7 @@ import {
   refreshTokenHandler,
   logoutHandler,
   resetPassword,
+  changePassword,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { validateBody } from "../middlewares/validate.middleware.js";
@@ -24,6 +25,7 @@ import {
   updateProfileSchema,
   placeOrderSchema,
   resetPasswordSchema,
+  changePasswordSchema,
 } from "../schemas/auth.schemas.js";
 
 export default async function authRoutes(fastify: FastifyInstance) {
@@ -88,6 +90,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
     config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
     preHandler: [validateBody(resetPasswordSchema)],
     handler: resetPassword,
+  });
+
+  // 3e. Authenticated Change Password (Rate limited: Max 5 / minute)
+  fastify.post("/change-password", {
+    config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
+    preHandler: [authMiddleware, validateBody(changePasswordSchema)],
+    handler: changePassword,
   });
 
   // 4. Current user session / profile

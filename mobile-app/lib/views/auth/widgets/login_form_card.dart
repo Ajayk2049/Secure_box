@@ -192,7 +192,32 @@ class _LoginFormCardState extends State<LoginFormCard> {
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+
+          // Forgot Password Link
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () {
+                Navigator.pushNamed(context, '/reset-password');
+              },
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Forgot Password?',
+                style: TextStyle(
+                  color: ParcelGlassColors.accentBlue,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 18),
 
           // Sign In Button
           SizedBox(

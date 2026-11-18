@@ -89,10 +89,11 @@ class ApiService {
 
 
   // 1. Smart Pre-Check & Send OTP
-  Future<Map<String, dynamic>> sendOtp(String phone) async {
+  Future<Map<String, dynamic>> sendOtp(String phone, {String type = 'register'}) async {
     try {
       final response = await _client.post('/api/auth/send-otp', data: {
         'phone': phone,
+        'type': type,
       });
       return response.data;
     } on DioException catch (e) {
@@ -100,6 +101,47 @@ class ApiService {
         return Map<String, dynamic>.from(e.response!.data);
       }
       throw Exception(extractErrorMessage(e, 'Failed to send OTP code'));
+    }
+  }
+
+  // 1d. Reset Password via Mobile OTP
+  Future<Map<String, dynamic>> resetPassword({
+    required String phone,
+    required String otp,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _client.post('/api/auth/reset-password', data: {
+        'phone': phone,
+        'otp': otp,
+        'newPassword': newPassword,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to reset password'));
+    }
+  }
+
+  // 1e. Authenticated Change Password
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final dio = await authDio;
+      final response = await dio.post('/api/auth/change-password', data: {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      });
+      return response.data;
+    } on DioException catch (e) {
+      if (e.response != null && e.response!.data is Map) {
+        return Map<String, dynamic>.from(e.response!.data);
+      }
+      throw Exception(extractErrorMessage(e, 'Failed to change password'));
     }
   }
 

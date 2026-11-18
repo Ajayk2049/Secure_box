@@ -308,6 +308,83 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> checkPhoneExists(String phone) async {
+    try {
+      final res = await _api.checkPhone(phone);
+      return res['exists'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> sendResetOtp(String phone) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final res = await _api.sendOtp(phone, type: 'reset');
+      _loading = false;
+      notifyListeners();
+      return res['success'] == true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> resetPassword({
+    required String phone,
+    required String otp,
+    required String newPassword,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final res = await _api.resetPassword(
+        phone: phone,
+        otp: otp,
+        newPassword: newPassword,
+      );
+      _loading = false;
+      notifyListeners();
+      return res['success'] == true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final res = await _api.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+      _loading = false;
+      notifyListeners();
+      return res['success'] == true;
+    } catch (e) {
+      final err = e.toString().replaceAll('Exception: ', '').trim();
+      setErrorWithAutoDismiss(err);
+      _loading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     _errorDismissTimer?.cancel();
     _error = null;

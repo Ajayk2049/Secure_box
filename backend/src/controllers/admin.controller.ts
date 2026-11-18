@@ -203,7 +203,21 @@ export async function getSystemLogs(request: FastifyRequest, reply: FastifyReply
 
 export async function getDeviceLogsForAdmin(request: FastifyRequest, reply: FastifyReply) {
   const { id } = request.params as { id: string };
-  const query = mongoose.isValidObjectId(id) ? { deviceId: id } : { deviceId: id };
+  let deviceDoc = null;
+  if (mongoose.isValidObjectId(id)) {
+    deviceDoc = await Device.findById(id);
+  }
+  if (!deviceDoc) {
+    deviceDoc = await Device.findOne({ deviceId: id.trim().toUpperCase() });
+  }
+
+  if (!deviceDoc) {
+    return reply.status(404).send({ error: "Device not found" });
+  }
+
+  const query = {
+    $or: [{ deviceId: deviceDoc._id }, { "metadata.deviceId": deviceDoc.deviceId }],
+  };
   const logs = await Log.find(query).sort({ timestamp: -1 }).limit(100);
   return reply.send({ logs });
 }

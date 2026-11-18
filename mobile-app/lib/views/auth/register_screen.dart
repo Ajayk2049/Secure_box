@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../view_models/auth_view_model.dart';
 import '../widgets/glass_theme.dart';
-import 'widgets/auth_top_bar.dart';
 import 'widgets/register_credentials_step.dart';
 import 'widgets/register_phone_otp_step.dart';
 
@@ -272,11 +271,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
           child: Column(
             children: [
-              // Top Bar: Wi-Fi Server Indicator
-              AuthTopBar(
-                onHostChanged: () => setState(() {}),
-              ),
-
               const SizedBox(height: 16),
 
               Text(

@@ -62,3 +62,8 @@ export const resetPasswordSchema = z.object({
   otp: z.string().min(4, "OTP must be at least 4 digits"),
   newPassword: z.string().min(6, "New password must be at least 6 characters long").max(12, "Password must not exceed 12 characters"),
 });
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters long").max(12, "Password must not exceed 12 characters"),
+});

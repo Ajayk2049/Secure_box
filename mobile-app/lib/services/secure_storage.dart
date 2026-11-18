@@ -136,6 +136,26 @@ class SecureStorage {
     }
   }
 
+  // --- Per-User 4-Digit Numeric PIN Security ---
+  Future<bool> isPinUnlockEnabled() async {
+    final val = await _safeRead('pin_unlock_enabled');
+    return val == 'true';
+  }
+
+  Future<String?> getPin() async {
+    return await _safeRead('user_unlock_pin');
+  }
+
+  Future<void> savePin(String pin) async {
+    await _safeWrite('user_unlock_pin', pin.trim());
+    await _safeWrite('pin_unlock_enabled', 'true');
+  }
+
+  Future<void> removePin() async {
+    await _safeDelete('user_unlock_pin');
+    await _safeDelete('pin_unlock_enabled');
+  }
+
   /// Purges all session tokens, credentials, and cached data on logout
   Future<void> purgeAllSessionData() async {
     await deleteToken();

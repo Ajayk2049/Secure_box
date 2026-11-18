@@ -4,7 +4,6 @@ import '../../services/connectivity_service.dart';
 import '../../view_models/auth_view_model.dart';
 import '../../view_models/home_view_model.dart';
 import 'glass_theme.dart';
-import 'network_host_dialog.dart';
 
 class ConnectionWarningCard extends StatefulWidget {
   final ConnectionIssue issue;
@@ -147,20 +146,6 @@ class _ConnectionWarningCardState extends State<ConnectionWarningCard> {
                           size: 18,
                           color: Color(0xFF991B1B),
                         ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              // Small host settings gear
-              InkWell(
-                onTap: () => NetworkHostDialog.show(context),
-                borderRadius: BorderRadius.circular(8),
-                child: const Padding(
-                  padding: EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.tune_rounded,
-                    size: 16,
-                    color: Color(0xFF991B1B),
-                  ),
                 ),
               ),
             ],

@@ -157,7 +157,7 @@ class HomeViewModel extends ChangeNotifier {
   void _handleWebSocketMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString();
     final targetDeviceId = message['deviceId']?.toString();
-    if (type == 'EMERGENCY_UNLOCK' && targetDeviceId != null && _isHistoryActive) {
+    if ((type == 'EMERGENCY_UNLOCK' || type == 'DELIVERY_SUCCESS') && targetDeviceId != null) {
       fetchDeviceLogs(targetDeviceId);
     }
 

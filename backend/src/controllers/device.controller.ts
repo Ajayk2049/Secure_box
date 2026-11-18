@@ -143,7 +143,6 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
 
   const baseFilter = {
     $or: [{ deviceId: device._id }, { "metadata.deviceId": device.deviceId }],
-    action: { $nin: ["door_open", "door_opened"] },
   };
 
   const limit = Math.min(50, Math.max(1, parseInt(queryParams.limit || "15", 10)));
@@ -205,13 +204,52 @@ export async function getDeviceLogs(request: FastifyRequest, reply: FastifyReply
     }
   }
 
-  const nextCursor = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+  const sanitizeLogs = (rawList: any[]) => {
+    const result: any[] = [];
+    for (let i = 0; i < rawList.length; i++) {
+      const entry = rawList[i];
+      const action = (entry.action || "").toString().toLowerCase();
+
+      if (action === "door_open" || action === "door_opened") {
+        const entryTime = new Date(entry.timestamp).getTime();
+        const hasAdjacentAppUnlock = rawList.some((other) => {
+          const otherAction = (other.action || "").toString().toLowerCase();
+          if (!otherAction.includes("unlock") || otherAction.includes("emergency")) return false;
+          const otherTime = new Date(other.timestamp).getTime();
+          return Math.abs(otherTime - entryTime) <= 15000;
+        });
+
+        if (hasAdjacentAppUnlock) {
+          continue;
+        }
+
+        result.push({
+          ...entry,
+          action: "emergency_unlock",
+          metadata: {
+            ...(entry.metadata || {}),
+            event: "emergency_manual_unlock",
+            source: "physical_latch",
+            userName: entry.metadata?.userName || "Manual Latch / Lever",
+            userRole: entry.metadata?.userRole || "Physical Access",
+          },
+        });
+        continue;
+      }
+
+      result.push(entry);
+    }
+    return result;
+  };
+
+  const sanitized = sanitizeLogs(logs);
+  const nextCursor = sanitized.length > 0 ? sanitized[sanitized.length - 1].timestamp : null;
 
   return reply.send({
-    logs,
+    logs: sanitized,
     hasMore,
     nextCursor,
-    count: logs.length,
+    count: sanitized.length,
   });
 }
 

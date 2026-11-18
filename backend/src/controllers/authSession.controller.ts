@@ -377,3 +377,41 @@ export async function resetPassword(request: FastifyRequest, reply: FastifyReply
 
   return reply.send({ success: true, message: "Password reset successfully. Please sign in with your new password." });
 }
+
+// 7. Authenticated Change Password (No OTP required for logged-in user)
+export async function changePassword(request: FastifyRequest, reply: FastifyReply) {
+  const authUser = request.user as { id: string };
+  if (!authUser?.id) {
+    return reply.status(401).send({ error: "Unauthorized" });
+  }
+
+  const { currentPassword, newPassword } = request.body as {
+    currentPassword?: string;
+    newPassword?: string;
+  };
+
+  if (!currentPassword || !newPassword) {
+    return reply.status(400).send({ error: "Current password and new password are required" });
+  }
+
+  if (newPassword.length < 6 || newPassword.length > 12) {
+    return reply.status(400).send({ error: "New password must be between 6 and 12 characters long" });
+  }
+
+  const user = await User.findById(authUser.id).select("+password");
+  if (!user) {
+    return reply.status(404).send({ error: "User account not found" });
+  }
+
+  const { valid: isMatch } = await verifyPassword(currentPassword, user.password);
+  if (!isMatch) {
+    return reply.status(401).send({ error: "Current password is incorrect" });
+  }
+
+  user.password = await hashPassword(newPassword);
+  user.failedLoginAttempts = 0;
+  user.lockUntil = undefined;
+  await user.save();
+
+  return reply.send({ success: true, message: "Password updated successfully" });
+}

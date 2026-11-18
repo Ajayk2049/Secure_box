@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../../view_models/auth_view_model.dart';
 import '../widgets/glass_theme.dart';
 import 'widgets/auth_brand_header.dart';
-import 'widgets/auth_top_bar.dart';
 import 'widgets/login_form_card.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -54,12 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Top Bar: Wi-Fi Server Indicator
-              AuthTopBar(
-                onHostChanged: () => setState(() {}),
-              ),
-
-              const SizedBox(height: 28),
+              const SizedBox(height: 16),
 
               // Hero Brand Emblem & Subtitle
               const AuthBrandHeader(),
