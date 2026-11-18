@@ -73,11 +73,10 @@ class _AvatarEmojiPickerState extends State<AvatarEmojiPicker> {
                       letterSpacing: 0.5,
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: ParcelGlassColors.slateSubtitle, size: 18),
+                  ParcelCircleCloseButton(
+                    size: 28,
+                    iconSize: 16,
                     onPressed: () => Navigator.pop(ctx),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
                   ),
                 ],
               ),

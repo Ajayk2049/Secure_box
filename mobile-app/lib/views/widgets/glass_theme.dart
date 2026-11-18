@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+export 'circular_action_buttons.dart';
 
 class ParcelGlassColors {
   // Warm Kraft Parcel Parchment Palette (matching the elegant reference design)

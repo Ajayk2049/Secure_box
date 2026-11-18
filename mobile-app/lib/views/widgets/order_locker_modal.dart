@@ -195,7 +195,6 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
   Widget build(BuildContext context) {
     final user = context.watch<AuthViewModel>().user;
     final primaryTextColor = ParcelGlassColors.textPrimary(context);
-    final secondaryTextColor = ParcelGlassColors.textSecondary(context);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -228,12 +227,7 @@ class _OrderLockerModalState extends State<OrderLockerModal> {
                 ),
               ),
             ),
-            IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: Icon(Icons.close, color: secondaryTextColor, size: 20),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
+            const ParcelCircleCloseButton(),
           ],
         ),
 

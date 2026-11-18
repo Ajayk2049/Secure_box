@@ -57,15 +57,10 @@ class SettingsScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                 child: Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_ios_new,
-                        color: ParcelGlassColors.navyTitle,
-                        size: 20,
-                      ),
+                    ParcelCircleBackButton(
                       onPressed: onBackToHome ?? () => Navigator.maybePop(context),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 12),
                     const Text(
                       'Settings',
                       style: TextStyle(
@@ -95,14 +90,14 @@ class SettingsScreen extends StatelessWidget {
               // 1. Rename Smart Locker Box
               SettingCapsuleTile(
                 icon: Icons.edit_note,
-                title: 'Rename Locker Box',
+                title: 'Rename Secure Box',
                 subtitle: home.isOffline
                     ? 'Unavailable while offline'
                     : (home.selectedDevice != null
                         ? (home.selectedDevice!.isOwner
                             ? '${home.selectedDevice!.name} (${home.selectedDevice!.deviceId})'
                             : '${home.selectedDevice!.name} • Primary Owner Only')
-                        : (devices.any((d) => d.isOwner) ? 'Personalize your locker name' : 'Primary Owner Only')),
+                        : (devices.any((d) => d.isOwner) ? 'Personalize your Secure Box name' : 'Primary Owner Only')),
                 onTap: home.isOffline
                     ? () => _showOfflineWarning(context)
                     : () {
@@ -128,7 +123,7 @@ class SettingsScreen extends StatelessWidget {
                 title: 'Manage Users & Slots',
                 subtitle: home.isOffline
                     ? 'Unavailable while offline'
-                    : 'Control who has access to your locker (2/5 active)',
+                    : 'Manage family access and co-owner member slots',
                 onTap: home.isOffline ? () => _showOfflineWarning(context) : () => ManageUsersDialog.show(context),
               ),
 
@@ -136,9 +131,7 @@ class SettingsScreen extends StatelessWidget {
               SettingCapsuleTile(
                 icon: Icons.local_shipping_outlined,
                 title: 'Order New Locker',
-                subtitle: user?.orderStatus != null && user!.orderStatus != 'none'
-                    ? 'Status: ${user.orderStatus!.toUpperCase()} • Free Doorstep Request'
-                    : 'Request additional smart locker units for your home',
+                subtitle: 'Order Additional Secure Box Units',
                 onTap: home.isOffline
                     ? () => _showOfflineWarning(context)
                     : () => OrderLockerModal.show(context),
@@ -147,7 +140,7 @@ class SettingsScreen extends StatelessWidget {
               // 4. Security & Authentication (Biometric & 4-Digit PIN)
               SettingCapsuleTile(
                 icon: Icons.shield_outlined,
-                title: 'Security & Unlock',
+                title: 'Security',
                 subtitle: security.securitySummaryText,
                 onTap: () => SecuritySettingsModal.show(context),
               ),
@@ -164,7 +157,7 @@ class SettingsScreen extends StatelessWidget {
               SettingCapsuleTile(
                 icon: Icons.info_outline,
                 title: 'About',
-                subtitle: 'App Version, Hardware Firmware',
+                subtitle: 'About Secure Box',
                 onTap: () => SettingsModals.showAboutModal(context),
               ),
 

@@ -112,12 +112,8 @@ class _NotificationPreferencesModalState extends State<NotificationPreferencesMo
                 ),
               ],
             ),
-            IconButton(
-              icon: const Icon(Icons.close, size: 20, color: ParcelGlassColors.slateSubtitle),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              splashRadius: 18,
-              onPressed: _isSaving ? null : () => Navigator.pop(context),
+            ParcelCircleCloseButton(
+              onPressed: _isSaving ? () {} : () => Navigator.pop(context),
             ),
           ],
         ),

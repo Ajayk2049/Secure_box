@@ -179,8 +179,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new, color: ParcelGlassColors.navyTitle, size: 20),
+                  ParcelCircleBackButton(
                     onPressed: () => Navigator.pop(context),
                   ),
                   const Spacer(),

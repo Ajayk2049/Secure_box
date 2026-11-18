@@ -2,10 +2,7 @@
 <!-- Secure Box Launch Screen Background (v21+) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_background" />
-    <item
-        android:width="200dp"
-        android:height="200dp"
-        android:gravity="center">
+    <item>
         <bitmap
             android:gravity="center"
             android:src="@drawable/launch_image" />

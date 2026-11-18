@@ -115,7 +115,6 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
   @override
   Widget build(BuildContext context) {
     final primaryTextColor = ParcelGlassColors.textPrimary(context);
-    final secondaryTextColor = ParcelGlassColors.textSecondary(context);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -148,12 +147,7 @@ class _AddLockerDialogState extends State<AddLockerDialog> {
                   ),
                 ),
               ),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: Icon(Icons.close, color: secondaryTextColor, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
+              const ParcelCircleCloseButton(),
             ],
           ),
 

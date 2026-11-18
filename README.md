@@ -80,6 +80,7 @@ graph TD
 - **HTTP**: Dio
 - **Storage**: flutter_secure_storage
 - **Biometrics**: local_auth (Fingerprint / Face ID hardware unlock)
+- **URL Handling**: url_launcher (Dialer, Email, Web links)
 - **State**: Provider + ChangeNotifier
 
 ## Project Structure

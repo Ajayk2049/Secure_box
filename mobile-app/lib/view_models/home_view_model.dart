@@ -100,7 +100,7 @@ class HomeViewModel extends ChangeNotifier {
 
       _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
-      _devices = _reconcileWithCurrentState(updatedDevices);
+      _devices = updatedDevices;
       if (_devices.isNotEmpty && _selectedDeviceId == null) {
         _selectedDeviceId = _devices.first.deviceId;
       }
@@ -154,7 +154,7 @@ class HomeViewModel extends ChangeNotifier {
 
       _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
-      _devices = _reconcileWithCurrentState(updatedDevices);
+      _devices = updatedDevices;
       if (_devices.isNotEmpty && _selectedDeviceId == null) {
         _selectedDeviceId = _devices.first.deviceId;
       }
@@ -176,7 +176,7 @@ class HomeViewModel extends ChangeNotifier {
 
         _cacheManager.saveCachedDevices(devicesData);
         final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
-        _devices = _reconcileWithCurrentState(updatedDevices);
+        _devices = updatedDevices;
         for (final d in _devices) {
           _ws.joinRoom(d.id);
           _ws.joinRoom(d.deviceId);
@@ -236,7 +236,7 @@ class HomeViewModel extends ChangeNotifier {
       final newDevices = rawList.map((json) => DeviceModel.fromJson(json)).toList();
       _cacheManager.saveCachedDevices(rawList);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
-      _devices = _reconcileWithCurrentState(updatedDevices);
+      _devices = updatedDevices;
       _loading = false;
       notifyListeners();
       return;
@@ -659,8 +659,14 @@ class HomeViewModel extends ChangeNotifier {
       final curIdx = _devices.indexWhere((c) => _matchesDevice(c, fresh.deviceId.toUpperCase()));
       if (curIdx == -1) return fresh;
       final cur = _devices[curIdx];
-      // Guard against REST poll or bulk updates overwriting newer WebSocket state
-      if (cur.statusVersion != null && fresh.statusVersion != null && fresh.statusVersion! < cur.statusVersion!) {
+      // Guard against background silent REST poll overwriting a newer live WebSocket frame
+      // within the same session. However, if the server confirms the device is online,
+      // or if statusVersion wrapped/restarted, always trust the fresh server evidence.
+      if (cur.statusVersion != null &&
+          fresh.statusVersion != null &&
+          fresh.statusVersion! < cur.statusVersion! &&
+          (cur.statusVersion! - fresh.statusVersion! < 20) &&
+          !fresh.online) {
         return fresh.copyWith(
           online: cur.online,
           statusVersion: cur.statusVersion,

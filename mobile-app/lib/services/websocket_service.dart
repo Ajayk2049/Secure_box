@@ -106,6 +106,9 @@ class WebSocketService {
           'deviceId': room,
         }));
       }
+
+      // Request fresh live device statuses immediately upon connection
+      requestDevices();
     } catch (e) {
       debugPrint('WebSocket connect exception: $e');
       _handleDisconnect();

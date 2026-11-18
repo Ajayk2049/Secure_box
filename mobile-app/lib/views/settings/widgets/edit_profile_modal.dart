@@ -133,12 +133,7 @@ class _EditProfileModalState extends State<EditProfileModal> {
                   ),
                 ],
               ),
-              IconButton(
-                icon: const Icon(Icons.close, color: ParcelGlassColors.slateSubtitle, size: 20),
-                onPressed: () => Navigator.pop(context),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
+              const ParcelCircleCloseButton(),
             ],
           ),
           const SizedBox(height: 16),

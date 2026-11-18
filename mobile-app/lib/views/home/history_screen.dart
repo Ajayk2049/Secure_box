@@ -99,9 +99,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: primaryTextColor, size: 18),
-          onPressed: () => Navigator.pop(context),
+        leading: Center(
+          child: ParcelCircleBackButton(
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         title: Text(
           'Locker Activity History',

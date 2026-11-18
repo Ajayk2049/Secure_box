@@ -114,15 +114,18 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
               child: const Icon(Icons.password_rounded, color: ParcelGlassColors.accentBlue, size: 20),
             ),
             const SizedBox(width: 10),
-            const Text(
-              'Change Password',
-              style: TextStyle(
-                color: ParcelGlassColors.navyTitle,
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.3,
+            const Expanded(
+              child: Text(
+                'Change Password',
+                style: TextStyle(
+                  color: ParcelGlassColors.navyTitle,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                ),
               ),
             ),
+            const ParcelCircleCloseButton(),
           ],
         ),
         const SizedBox(height: 6),
