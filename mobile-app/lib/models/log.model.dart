@@ -23,6 +23,22 @@ class LogModel {
     );
   }
 
+  LogModel copyWith({
+    String? id,
+    String? deviceId,
+    String? action,
+    DateTime? timestamp,
+    Map<String, dynamic>? metadata,
+  }) {
+    return LogModel(
+      id: id ?? this.id,
+      deviceId: deviceId ?? this.deviceId,
+      action: action ?? this.action,
+      timestamp: timestamp ?? this.timestamp,
+      metadata: metadata ?? this.metadata,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       '_id': id,

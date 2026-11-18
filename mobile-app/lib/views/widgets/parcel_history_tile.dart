@@ -28,7 +28,7 @@ class ParcelHistoryTile extends StatelessWidget {
     final isDelivery = actionLower.contains('delivery');
 
     final IconData icon = isEmergencyUnlock
-        ? Icons.vpn_key_rounded
+        ? Icons.warning_amber_rounded
         : (isUnlock
             ? Icons.lock_open_rounded
             : (isLock
@@ -46,7 +46,7 @@ class ParcelHistoryTile extends StatelessWidget {
                                     : Icons.history_rounded)))))));
 
     final Color iconColor = isEmergencyUnlock
-        ? ParcelGlassColors.amberSignal
+        ? const Color(0xFFEA580C)
         : (isUnlock
             ? ParcelGlassColors.alertRed
             : (isLock
@@ -97,6 +97,14 @@ class ParcelHistoryTile extends StatelessWidget {
         ? rawActor.trim()
         : null;
 
+    final String? subtitleText = isEmergencyUnlock
+        ? 'via Manual Latch'
+        : (actorName != null && actorName.isNotEmpty
+            ? (actorName.startsWith(RegExp(r'by\s+', caseSensitive: false))
+                ? actorName
+                : 'by $actorName')
+            : null);
+
     final localTime = log.timestamp.toLocal();
     final rawHour = localTime.hour;
     final period = rawHour >= 12 ? 'PM' : 'AM';
@@ -109,15 +117,21 @@ class ParcelHistoryTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.45),
+          color: isEmergencyUnlock
+              ? const Color(0xFFFFFBEB).withValues(alpha: 0.75)
+              : Colors.white.withValues(alpha: 0.45),
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: Colors.white.withValues(alpha: 0.65),
-            width: 1.2,
+            color: isEmergencyUnlock
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.65),
+            width: isEmergencyUnlock ? 1.5 : 1.2,
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF3D2310).withValues(alpha: 0.08),
+              color: isEmergencyUnlock
+                  ? const Color(0xFFEA580C).withValues(alpha: 0.10)
+                  : const Color(0xFF3D2310).withValues(alpha: 0.08),
               blurRadius: 14,
               offset: const Offset(0, 4),
             ),
@@ -152,14 +166,12 @@ class ParcelHistoryTile extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (actorName != null && actorName.isNotEmpty) ...[
+                  if (subtitleText != null && subtitleText.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(
-                      actorName.startsWith(RegExp(r'by\s+', caseSensitive: false))
-                          ? actorName
-                          : 'by $actorName',
+                      subtitleText,
                       style: TextStyle(
-                        color: secondaryTextColor,
+                        color: isEmergencyUnlock ? const Color(0xFFD97706) : secondaryTextColor,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                       ),

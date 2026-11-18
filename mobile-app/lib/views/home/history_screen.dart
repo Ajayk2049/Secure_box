@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/log.model.dart';
 import '../../view_models/home_view_model.dart';
 import '../widgets/glass_theme.dart';
 import '../widgets/parcel_history_tile.dart';
@@ -34,7 +35,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final primaryTextColor = ParcelGlassColors.textPrimary(context);
     final secondaryTextColor = ParcelGlassColors.textSecondary(context);
 
-    final filteredLogs = home.logs.where((l) => l.action.toLowerCase() != 'door_open').toList();
+    final filteredLogs = <LogModel>[];
+    for (int i = 0; i < home.logs.length; i++) {
+      final l = home.logs[i];
+      final a = l.action.toLowerCase().replaceAll(' ', '_');
+
+      if (a == 'door_open' || a == 'door_opened') {
+        final hasAdjacentAppUnlock = home.logs.any((other) {
+          final otherAction = other.action.toLowerCase();
+          return otherAction.contains('unlock') &&
+              !otherAction.contains('emergency') &&
+              other.timestamp.difference(l.timestamp).abs().inSeconds <= 15;
+        });
+
+        if (hasAdjacentAppUnlock) continue;
+        filteredLogs.add(l.copyWith(action: 'emergency_unlock'));
+        continue;
+      }
+
+      if (filteredLogs.isNotEmpty &&
+          filteredLogs.last.action.toLowerCase() == l.action.toLowerCase() &&
+          (a == 'device_offline' || a == 'device_online' || a == 'door_closed' || a == 'lock') &&
+          filteredLogs.last.timestamp.difference(l.timestamp).abs().inSeconds <= 10) {
+        continue;
+      }
+      filteredLogs.add(l);
+    }
 
     return ParcelGlassScaffold(
       appBar: AppBar(

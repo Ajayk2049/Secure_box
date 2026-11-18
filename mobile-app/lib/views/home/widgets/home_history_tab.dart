@@ -39,14 +39,33 @@ class _HomeHistoryTabState extends State<HomeHistoryTab> {
   Widget build(BuildContext context) {
     final home = context.watch<HomeViewModel>();
     final validLogs = <LogModel>[];
-    for (final l in home.logs) {
+    for (int i = 0; i < home.logs.length; i++) {
+      final l = home.logs[i];
       final a = l.action.toLowerCase().replaceAll(' ', '_');
-      if (a == 'door_open' || a == 'door_opened') continue;
 
-      // Deduplicate rapid consecutive duplicate offline or online logs
+      // Standalone sensor door open (without adjacent app unlock) is a manual/emergency unlock
+      if (a == 'door_open' || a == 'door_opened') {
+        final hasAdjacentAppUnlock = home.logs.any((other) {
+          final otherAction = other.action.toLowerCase();
+          return otherAction.contains('unlock') &&
+              !otherAction.contains('emergency') &&
+              other.timestamp.difference(l.timestamp).abs().inSeconds <= 15;
+        });
+
+        if (hasAdjacentAppUnlock) {
+          // Skip redundant door_open if authorized app unlock already logged
+          continue;
+        }
+
+        // Standalone physical latch press: display as Emergency Unlock
+        validLogs.add(l.copyWith(action: 'emergency_unlock'));
+        continue;
+      }
+
+      // Deduplicate rapid consecutive duplicate offline, online, or lock events within 10s
       if (validLogs.isNotEmpty &&
           validLogs.last.action.toLowerCase() == l.action.toLowerCase() &&
-          (a == 'device_offline' || a == 'device_online') &&
+          (a == 'device_offline' || a == 'device_online' || a == 'door_closed' || a == 'lock') &&
           validLogs.last.timestamp.difference(l.timestamp).abs().inSeconds <= 10) {
         continue;
       }

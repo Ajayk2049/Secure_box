@@ -4,6 +4,7 @@ import { Device } from "../models/Device.model.js";
 import { Log } from "../models/Log.model.js";
 import { wsService } from "./websocket.service.js";
 import { fcmService } from "./fcm.service.js";
+import { commandQueueService } from "./commandQueue.service.js";
 import { devicePresenceService } from "./devicePresence.service.js";
 import { verifyDeviceKey, hashDeviceKey } from "../utils/crypto.js";
 import { config } from "../config.js";
@@ -319,15 +320,62 @@ class DeviceSocketService {
     device.doorState = doorState;
     await device.save();
 
-    if (previousState !== doorState) {
-      await Log.create({
-        deviceId: device._id,
-        action: doorState === "open" ? "door_opened" : "door_closed",
-        metadata: { source: "esp32_sensor", deviceId: cleanId },
-      });
+    const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
 
+    if (previousState !== doorState) {
       if (doorState === "open") {
-        fcmService.notifyLockerOpened(device).catch((e) => console.error("[FCM] Locker opened notice error:", e));
+        const hasAuthorizedAppUnlock = commandQueueService.hasRecentUnlock(cleanId);
+        if (hasAuthorizedAppUnlock) {
+          // Authorized in-app unlock already logged with user attribution; consume window
+          commandQueueService.consumeRecentUnlock(cleanId);
+        } else {
+          // Manual / Emergency unlock detected (user pushed the physical latch on the solenoid)
+          await Log.create({
+            deviceId: device._id,
+            action: "emergency_unlock",
+            metadata: {
+              event: "emergency_manual_unlock",
+              source: "physical_latch",
+              userName: "Manual Latch / Lever",
+              userRole: "Physical Access",
+              deviceId: cleanId,
+              detection: "hardware_latch_release",
+            },
+          });
+
+          const emergencyMsg = {
+            type: "EMERGENCY_UNLOCK",
+            deviceId: cleanId,
+            doorState: "open",
+            doorStatus: "unlocked",
+            online: true,
+          };
+          wsService.broadcastToDeviceGroup(targets, emergencyMsg);
+
+          fcmService.notifyLockerOpened(device).catch((e) => console.error("[FCM] Emergency unlock notice error:", e));
+        }
+      } else {
+        // Door pushed shut (catch engaged, locker locked)
+        await Log.create({
+          deviceId: device._id,
+          action: "door_closed",
+          metadata: {
+            event: "door_locked",
+            source: "physical_sensor",
+            userName: "Mechanical Latch",
+            userRole: "Auto / Sensor",
+            deviceId: cleanId,
+          },
+        });
+
+        const deliveryMsg = {
+          type: "DELIVERY_SUCCESS",
+          deviceId: cleanId,
+          doorState: "closed",
+          doorStatus: "locked",
+          online: true,
+        };
+        wsService.broadcastToDeviceGroup(targets, deliveryMsg);
       }
     }
 
@@ -338,7 +386,6 @@ class DeviceSocketService {
       device.lastHeartbeat
     );
 
-    const targets = [cleanId, device._id, device.ownerId, ...(device.coOwners || [])];
     const lastSeenStr = presence.lastSeenAt
       ? new Date(presence.lastSeenAt).toISOString()
       : new Date().toISOString();
