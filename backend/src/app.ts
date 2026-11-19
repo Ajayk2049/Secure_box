@@ -320,7 +320,17 @@ async function bootstrap() {
             .select("-deviceKey -deviceKeyHash")
             .populate("ownerId", "phone email name")
             .lean();
-          const enriched = devices.map((d: any) => deviceStatusService.enrichWithLiveStatus(d));
+          const userIdStr = decodedUser.id?.toString().trim().toLowerCase();
+          const enriched = devices.map((d: any) => {
+            const live = deviceStatusService.enrichWithLiveStatus(d);
+            const ownerIdStr = (d.ownerId?._id || d.ownerId)?.toString().trim().toLowerCase();
+            const isOwner = Boolean(userIdStr && ownerIdStr && ownerIdStr === userIdStr);
+            return {
+              ...live,
+              isOwner,
+              userRole: isOwner ? "Owner" : "Co-Owner",
+            };
+          });
           socket.send(JSON.stringify({
             type: "DEVICES_UPDATE",
             devices: enriched,

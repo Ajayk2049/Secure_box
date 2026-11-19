@@ -30,6 +30,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _currentTab = 0; // 0: Home, 1: History, 2: Settings
   String? _unlockingDeviceId;
+  bool _wasInBackground = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,8 +49,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      context.read<HomeViewModel>().handleAppResumed();
+    // Only set background flag when app is truly minimized / backgrounded.
+    // Temporary overlays (pulling down notification shade or quick settings)
+    // transition through 'inactive' without ever entering 'paused' or 'hidden'.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _wasInBackground = true;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_wasInBackground) {
+        _wasInBackground = false;
+        context.read<HomeViewModel>().handleAppResumed();
+      }
     }
   }
 

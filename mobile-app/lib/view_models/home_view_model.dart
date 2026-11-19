@@ -98,9 +98,9 @@ class HomeViewModel extends ChangeNotifier {
           .map((json) => DeviceModel.fromJson(json))
           .toList();
 
-      _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
       _devices = updatedDevices;
+      _cacheManager.saveCachedDevices(_devices.map((d) => d.toJson()).toList());
       if (_devices.isNotEmpty && _selectedDeviceId == null) {
         _selectedDeviceId = _devices.first.deviceId;
       }
@@ -152,9 +152,9 @@ class HomeViewModel extends ChangeNotifier {
           .map((json) => DeviceModel.fromJson(json))
           .toList();
 
-      _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
       _devices = updatedDevices;
+      _cacheManager.saveCachedDevices(_devices.map((d) => d.toJson()).toList());
       if (_devices.isNotEmpty && _selectedDeviceId == null) {
         _selectedDeviceId = _devices.first.deviceId;
       }
@@ -174,9 +174,9 @@ class HomeViewModel extends ChangeNotifier {
             .map((json) => DeviceModel.fromJson(json))
             .toList();
 
-        _cacheManager.saveCachedDevices(devicesData);
         final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
         _devices = updatedDevices;
+        _cacheManager.saveCachedDevices(_devices.map((d) => d.toJson()).toList());
         for (final d in _devices) {
           _ws.joinRoom(d.id);
           _ws.joinRoom(d.deviceId);
@@ -233,10 +233,26 @@ class HomeViewModel extends ChangeNotifier {
 
     if (type == 'DEVICES_UPDATE' && message['devices'] is List) {
       final rawList = message['devices'] as List;
-      final newDevices = rawList.map((json) => DeviceModel.fromJson(json)).toList();
-      _cacheManager.saveCachedDevices(rawList);
+      final newDevices = rawList.map((json) {
+        final parsed = DeviceModel.fromJson(json);
+        // If incoming json didn't specify isOwner, preserve from current device state if available
+        if (json is Map && json['isOwner'] == null) {
+          final existing = _devices.firstWhere(
+            (d) => _matchesDevice(d, parsed.deviceId.toUpperCase()),
+            orElse: () => parsed,
+          );
+          if (existing != parsed) {
+            return parsed.copyWith(
+              isOwner: existing.isOwner,
+              userRole: existing.userRole,
+            );
+          }
+        }
+        return parsed;
+      }).toList();
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
       _devices = updatedDevices;
+      _cacheManager.saveCachedDevices(_devices.map((d) => d.toJson()).toList());
       _loading = false;
       notifyListeners();
       return;
@@ -363,9 +379,9 @@ class HomeViewModel extends ChangeNotifier {
           .map((json) => DeviceModel.fromJson(json))
           .toList();
 
-      _cacheManager.saveCachedDevices(devicesData);
       final updatedDevices = _cacheManager.applyRecentUnlocks(newDevices, _recentlyUnlockedUntil);
       final reconciledDevices = _reconcileWithCurrentState(updatedDevices);
+      _cacheManager.saveCachedDevices(reconciledDevices.map((d) => d.toJson()).toList());
 
       if (_cacheManager.haveDevicesChanged(_devices, reconciledDevices)) {
         _devices = reconciledDevices;
@@ -403,8 +419,8 @@ class HomeViewModel extends ChangeNotifier {
           .map((json) => DeviceModel.fromJson(json))
           .toList();
 
-      _cacheManager.saveCachedDevices(devicesData);
       _devices = _cacheManager.applyRecentUnlocks(rawDevices, _recentlyUnlockedUntil);
+      _cacheManager.saveCachedDevices(_devices.map((d) => d.toJson()).toList());
 
       for (final d in _devices) {
         _ws.joinRoom(d.id);
